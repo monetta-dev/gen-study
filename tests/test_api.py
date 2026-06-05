@@ -5,7 +5,7 @@ import urllib.error
 import urllib.request
 
 from mathgen.agents import GeneratorAgent, MathGenerationService, ValidatorAgent
-from mathgen.api import create_server
+from mathgen.api import MathGenerationHandler, create_server
 
 
 class FakeClient:
@@ -16,6 +16,33 @@ class FakeClient:
         if isinstance(self.responses[0], Exception):
             raise self.responses.pop(0)
         return self.responses.pop(0)
+
+
+class BrokenPipeWriter:
+    def write(self, body):
+        raise BrokenPipeError("client closed")
+
+
+class FakeHandlerForSendJson:
+    debug_tracebacks = False
+
+    def __init__(self):
+        self.wfile = BrokenPipeWriter()
+        self.status = None
+        self.headers = []
+        self.ended = False
+
+    def send_response(self, status):
+        self.status = status
+
+    def send_header(self, key, value):
+        self.headers.append((key, value))
+
+    def end_headers(self):
+        self.ended = True
+
+    def log_message(self, format, *args):
+        raise AssertionError("log_message should not be called when debug_tracebacks is false")
 
 
 class ApiTests(unittest.TestCase):
@@ -100,3 +127,11 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["status"], "error")
         self.assertEqual(payload["error"], "internal_server_error")
         self.assertEqual(payload["detail"], "provider disconnected")
+
+    def test_send_json_ignores_disconnected_clients(self):
+        handler = FakeHandlerForSendJson()
+
+        MathGenerationHandler._send_json(handler, 200, {"status": "success"})
+
+        self.assertEqual(handler.status, 200)
+        self.assertTrue(handler.ended)

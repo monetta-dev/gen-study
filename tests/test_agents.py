@@ -114,6 +114,10 @@ class AgentTests(unittest.TestCase):
         self.assertIn("do not generate diagrams", generator_system_prompt)
         self.assertIn("Japanese high school physics curriculum guidelines", generator_system_prompt)
         self.assertIn("Text-only Requirement", validator_system_prompt)
+        self.assertIn("extract the required knowledge", validator_system_prompt)
+        self.assertIn("Judge whether each item is taught", validator_system_prompt)
+        self.assertIn("High difficulty means harder combinations", validator_system_prompt)
+        self.assertIn("not university-level physics or mathematics", validator_system_prompt)
         self.assertIn('"subject": "physics"', validator_payload)
 
     def test_request_accepts_subject_aliases_and_rejects_unknown_subjects(self):

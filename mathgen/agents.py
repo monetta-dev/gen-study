@@ -75,6 +75,8 @@ Evaluate the generated problem and solution using this mandatory checklist:
 2. Curriculum Compliance: solvable without knowledge beyond the {instruction["curriculum_scope"]}.
 3. Japanese Output: the final problem and solution text are written in Japanese, with only mathematical notation, symbols, variable names, units, and standard terms left as needed.
 4. Text-only Requirement: for physics, reject any problem that requires a diagram, figure, image, or visual reference to solve.
+Before deciding, extract the required knowledge, concepts, laws, formulas, and mathematical methods used in the problem and solution. Judge whether each item is taught within the subject curriculum and prerequisite Japanese high school mathematics. Reject if solving requires any item outside that scope, even when the final answer is correct.
+High difficulty means harder combinations of high-school methods, not university-level physics or mathematics.
 Reject problems with {instruction["rejection_scope"]}.
 Use DeepSeek thinking internally, but output only strict JSON.
 Return exactly this JSON shape:
