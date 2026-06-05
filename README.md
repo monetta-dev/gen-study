@@ -16,6 +16,7 @@ Physics generation is text-only. The generator is instructed not to create diagr
 - Optional: `DEEPSEEK_BASE_URL`, defaults to `https://api.deepseek.com`
 - Optional: `DEEPSEEK_MODEL`, defaults to `deepseek-v4-pro`
 - Optional: `DEEPSEEK_TIMEOUT_SECONDS`, defaults to `300`
+- Optional: `GENERATION_TRACE`, defaults to `false`
 
 The implementation uses only the Python standard library.
 
@@ -32,6 +33,7 @@ Then edit `.env` and set your actual API key:
 ```dotenv
 DEEPSEEK_API_KEY=your_api_key_here
 DEEPSEEK_TIMEOUT_SECONDS=300
+GENERATION_TRACE=false
 ```
 
 Start the server:
@@ -41,6 +43,14 @@ python3 -m mathgen.api
 ```
 
 The server listens on `http://127.0.0.1:8000`.
+
+To see each Generator and Validator exchange in the server terminal, set:
+
+```dotenv
+GENERATION_TRACE=true
+```
+
+The trace shows the prompts sent to each agent, the JSON content returned by each agent, and the validator decision. It does not expose private model thinking tokens; DeepSeek uses thinking internally and returns the final message content.
 
 ## Request
 

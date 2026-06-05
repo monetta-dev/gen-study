@@ -1,6 +1,12 @@
+from io import StringIO
 import unittest
 
-from mathgen.agents import GeneratorAgent, MathGenerationService, ValidatorAgent
+from mathgen.agents import (
+    GeneratorAgent,
+    InteractionTracer,
+    MathGenerationService,
+    ValidatorAgent,
+)
 from mathgen.models import GenerateRequest
 
 
@@ -138,3 +144,43 @@ class AgentTests(unittest.TestCase):
             GenerateRequest.from_dict(
                 {"subject": "chemistry", "level": "Standard", "topic": "Moles"}
             )
+
+    def test_interaction_tracer_logs_generation_and_validation_flow(self):
+        trace_output = StringIO()
+        tracer = InteractionTracer(enabled=True, writer=trace_output)
+        generator_client = FakeClient(
+            [
+                '{"problem":"磁場中の荷電粒子について答えよ。","solution":"ローレンツ力より求める。"}',
+            ]
+        )
+        validator_client = FakeClient(
+            [
+                '{"passed":true,"solution_accurate":true,"curriculum_compliant":true,"issues":[]}',
+            ]
+        )
+        service = MathGenerationService(
+            GeneratorAgent(generator_client, tracer=tracer),
+            ValidatorAgent(validator_client, tracer=tracer),
+            tracer=tracer,
+        )
+
+        service.generate_verified(
+            GenerateRequest.from_dict(
+                {
+                    "subject": "physics",
+                    "level": "University of Tokyo",
+                    "topic": "Magnetic Fields",
+                }
+            )
+        )
+
+        trace = trace_output.getvalue()
+        self.assertIn("=== Generation attempt 1", trace)
+        self.assertIn("--- Generator request ---", trace)
+        self.assertIn("Subject: physics", trace)
+        self.assertIn("--- Generator response ---", trace)
+        self.assertIn("--- Validator request ---", trace)
+        self.assertIn("--- Validator response ---", trace)
+        self.assertIn("--- Validator decision ---", trace)
+        self.assertIn("passed=True", trace)
+        self.assertIn("=== Final result: status=success ===", trace)

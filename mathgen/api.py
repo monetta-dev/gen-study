@@ -8,7 +8,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from .agents import GeneratorAgent, MathGenerationService, ValidatorAgent
+from .agents import GeneratorAgent, InteractionTracer, MathGenerationService, ValidatorAgent
 from .deepseek import DeepSeekClient, DeepSeekError
 from .env import load_dotenv
 from .models import ContractError, GenerateRequest
@@ -16,12 +16,20 @@ from .models import ContractError, GenerateRequest
 
 def build_service() -> MathGenerationService:
     load_dotenv()
+    tracer = InteractionTracer(enabled=_env_flag("GENERATION_TRACE"))
     generator_client = DeepSeekClient()
     validator_client = DeepSeekClient()
     return MathGenerationService(
-        generator=GeneratorAgent(generator_client),
-        validator=ValidatorAgent(validator_client),
+        generator=GeneratorAgent(generator_client, tracer=tracer),
+        validator=ValidatorAgent(validator_client, tracer=tracer),
+        tracer=tracer,
     )
+
+
+def _env_flag(name: str) -> bool:
+    import os
+
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class MathGenerationHandler(BaseHTTPRequestHandler):
