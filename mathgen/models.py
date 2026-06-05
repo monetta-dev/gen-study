@@ -1,4 +1,4 @@
-"""Data contracts for the math generation API."""
+"""Data contracts for the exam question generation API."""
 
 from __future__ import annotations
 
@@ -21,16 +21,37 @@ def _required_string(data: dict[str, Any], field: str) -> str:
 class GenerateRequest:
     level: str
     topic: str
+    subject: str = "mathematics"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GenerateRequest":
         return cls(
             level=_required_string(data, "level"),
             topic=_required_string(data, "topic"),
+            subject=_subject_string(data),
         )
 
     def to_dict(self) -> dict[str, str]:
-        return {"level": self.level, "topic": self.topic}
+        return {"level": self.level, "topic": self.topic, "subject": self.subject}
+
+
+def _subject_string(data: dict[str, Any]) -> str:
+    raw_value = data.get("subject", "mathematics")
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        raise ContractError("`subject` must be a non-empty string")
+
+    normalized = raw_value.strip().lower()
+    aliases = {
+        "math": "mathematics",
+        "mathematics": "mathematics",
+        "数学": "mathematics",
+        "physics": "physics",
+        "物理": "physics",
+    }
+    subject = aliases.get(normalized)
+    if subject is None:
+        raise ContractError("`subject` must be `mathematics` or `physics`")
+    return subject
 
 
 @dataclass(frozen=True)

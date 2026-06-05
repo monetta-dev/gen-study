@@ -14,25 +14,71 @@ class ChatClient(Protocol):
         """Return the assistant content for the provided chat messages."""
 
 
-GENERATOR_SYSTEM_PROMPT = """You are Generator, an independent mathematics exam author.
-Create one original Japanese university entrance exam mathematics question.
+SUBJECT_INSTRUCTIONS = {
+    "mathematics": {
+        "generator_role": "an independent mathematics exam author",
+        "subject_name": "mathematics",
+        "curriculum_scope": "Japanese high school mathematics curriculum",
+        "accuracy_scope": "formulas, calculations, logical steps, and existence of a valid solution",
+        "constraints": (
+            "Mathematical expressions must be written in LaTeX using $...$ or $$...$$."
+        ),
+        "rejection_scope": (
+            "mathematical flaws, insufficient conditions, redundant contradictory "
+            "conditions, or out-of-scope methods"
+        ),
+    },
+    "physics": {
+        "generator_role": "an independent physics exam author",
+        "subject_name": "physics",
+        "curriculum_scope": "Japanese high school physics curriculum guidelines",
+        "accuracy_scope": (
+            "physical laws, units, formulas, numerical calculations, assumptions, "
+            "and existence of a valid solution"
+        ),
+        "constraints": (
+            "Use only text; do not generate diagrams, figures, image references, or "
+            "questions that require a diagram to solve. Describe any physical setup "
+            "completely in words. Mathematical and physical expressions must be "
+            "written in LaTeX using $...$ or $$...$$."
+        ),
+        "rejection_scope": (
+            "physics flaws, incorrect units, missing assumptions, insufficient "
+            "conditions, diagram-dependent wording, redundant contradictory "
+            "conditions, or out-of-scope methods"
+        ),
+    },
+}
+
+
+def _subject_instruction(subject: str) -> dict[str, str]:
+    return SUBJECT_INSTRUCTIONS[subject]
+
+
+def generator_system_prompt(subject: str) -> str:
+    instruction = _subject_instruction(subject)
+    return f"""You are Generator, {instruction["generator_role"]}.
+Create one original Japanese university entrance exam {instruction["subject_name"]} question.
 Use DeepSeek thinking internally, but output only strict JSON.
 Write both the problem and solution in Japanese.
-The problem must be solvable within the Japanese high school mathematics curriculum.
-Mathematical expressions must be written in LaTeX using $...$ or $$...$$.
+The problem must be solvable within the {instruction["curriculum_scope"]}.
+{instruction["constraints"]}
 Return exactly this JSON shape:
-{"problem":"...","solution":"..."}"""
+{{"problem":"...","solution":"..."}}"""
 
 
-VALIDATOR_SYSTEM_PROMPT = """You are Validator, an independent mathematics reviewer.
+def validator_system_prompt(subject: str) -> str:
+    instruction = _subject_instruction(subject)
+    return f"""You are Validator, an independent {instruction["subject_name"]} reviewer.
 Evaluate the generated problem and solution using this mandatory checklist:
-1. Accuracy of Solution: formulas, calculations, logical steps, and existence of a valid solution.
-2. Curriculum Compliance: solvable without knowledge beyond Japanese high school mathematics curriculum guidelines.
-3. Japanese Output: the final problem and solution text are written in Japanese, with only mathematical notation, symbols, variable names, and standard terms left as needed.
-Reject problems with mathematical flaws, insufficient conditions, redundant contradictory conditions, or out-of-scope methods.
+1. Accuracy of Solution: {instruction["accuracy_scope"]}.
+2. Curriculum Compliance: solvable without knowledge beyond the {instruction["curriculum_scope"]}.
+3. Japanese Output: the final problem and solution text are written in Japanese, with only mathematical notation, symbols, variable names, units, and standard terms left as needed.
+4. Text-only Requirement: for physics, reject any problem that requires a diagram, figure, image, or visual reference to solve.
+Reject problems with {instruction["rejection_scope"]}.
 Use DeepSeek thinking internally, but output only strict JSON.
 Return exactly this JSON shape:
-{"passed":true|false,"solution_accurate":true|false,"curriculum_compliant":true|false,"issues":["..."]}"""
+{{"passed":true|false,"solution_accurate":true|false,"curriculum_compliant":true|false,"issues":["..."]}}"""
 
 
 class GeneratorAgent:
@@ -42,11 +88,12 @@ class GeneratorAgent:
     def generate(self, request: GenerateRequest) -> GeneratedProblem:
         content = self.client.chat(
             [
-                {"role": "system", "content": GENERATOR_SYSTEM_PROMPT},
+                {"role": "system", "content": generator_system_prompt(request.subject)},
                 {
                     "role": "user",
                     "content": (
-                        "Generate one entrance exam math question with solution.\n"
+                        f"Generate one entrance exam {request.subject} question with solution.\n"
+                        f"Subject: {request.subject}\n"
                         f"Difficulty level: {request.level}\n"
                         f"Topic: {request.topic}"
                     ),
@@ -65,11 +112,12 @@ class ValidatorAgent:
     ) -> ValidationResult:
         content = self.client.chat(
             [
-                {"role": "system", "content": VALIDATOR_SYSTEM_PROMPT},
+                {"role": "system", "content": validator_system_prompt(request.subject)},
                 {
                     "role": "user",
                     "content": json.dumps(
                         {
+                            "subject": request.subject,
                             "level": request.level,
                             "topic": request.topic,
                             "problem": generated.problem,

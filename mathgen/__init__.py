@@ -1,4 +1,4 @@
-"""Math question generation and verification API package."""
+"""Entrance exam question generation and verification API package."""
 
 from .agents import GeneratorAgent, MathGenerationService, ValidatorAgent
 from .models import GenerateRequest, GeneratedProblem, ValidationResult

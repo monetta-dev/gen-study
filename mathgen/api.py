@@ -1,4 +1,4 @@
-"""HTTP API for math question generation and verification."""
+"""HTTP API for exam question generation and verification."""
 
 from __future__ import annotations
 
@@ -115,8 +115,11 @@ def create_server(
 def main() -> None:
     load_dotenv()
     server = create_server()
-    print("Serving math generation API on http://127.0.0.1:8000")
-    print("POST /generate with JSON: {\"level\":\"University of Tokyo\",\"topic\":\"Probability Recurrence Relations\"}")
+    print("Serving exam question generation API on http://127.0.0.1:8000")
+    print(
+        "POST /generate with JSON: "
+        "{\"subject\":\"physics\",\"level\":\"University of Tokyo\",\"topic\":\"Mechanics\"}"
+    )
     server.serve_forever()
 
 
