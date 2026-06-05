@@ -1,0 +1,9 @@
+[project]
+name = "gen-study"
+version = "0.1.0"
+description = "Math question generation and verification API using independent DeepSeek agents."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.unittest]
+start-directory = "tests"
