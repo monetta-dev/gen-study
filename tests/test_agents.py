@@ -116,15 +116,57 @@ class AgentTests(unittest.TestCase):
         validator_system_prompt = validator_client.messages[0][0]["content"]
         validator_payload = validator_client.messages[0][1]["content"]
         self.assertIn("physics", generator_system_prompt)
-        self.assertIn("Use only text", generator_system_prompt)
-        self.assertIn("do not generate diagrams", generator_system_prompt)
+        self.assertIn("Do not output raw diagrams", generator_system_prompt)
+        self.assertIn("allow_diagram is false", generator_system_prompt)
         self.assertIn("Japanese high school physics curriculum guidelines", generator_system_prompt)
         self.assertIn("Text-only Requirement", validator_system_prompt)
+        self.assertIn("Diagram Consistency", validator_system_prompt)
         self.assertIn("extract the required knowledge", validator_system_prompt)
         self.assertIn("Judge whether each item is taught", validator_system_prompt)
         self.assertIn("High difficulty means harder combinations", validator_system_prompt)
         self.assertIn("not university-level subject knowledge or mathematics", validator_system_prompt)
         self.assertIn('"subject": "physics"', validator_payload)
+        self.assertIn('"allow_diagram": false', validator_payload)
+
+    def test_physics_generation_with_diagram_renders_svg_response(self):
+        generator_client = FakeClient(
+            [
+                (
+                    '{"problem":"傾角 $30^\\\\circ$ の斜面上の物体を考える。",'
+                    '"solution":"力を斜面方向に分解する。",'
+                    '"diagram_spec":{"kind":"inclined_plane","description":"斜面上の物体",'
+                    '"angle_deg":30,"block_label":"m","forces":["mg","N"]}}'
+                ),
+            ]
+        )
+        validator_client = FakeClient(
+            [
+                '{"passed":true,"solution_accurate":true,"curriculum_compliant":true,"issues":[]}',
+            ]
+        )
+        service = MathGenerationService(
+            GeneratorAgent(generator_client),
+            ValidatorAgent(validator_client),
+        )
+
+        result = service.generate_verified(
+            GenerateRequest.from_dict(
+                {
+                    "subject": "physics",
+                    "level": "University of Tokyo",
+                    "topic": "Mechanics",
+                    "allow_diagram": True,
+                }
+            )
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn("diagram", result)
+        self.assertEqual(result["diagram"]["type"], "svg")
+        self.assertEqual(result["diagram"]["spec"]["kind"], "inclined_plane")
+        self.assertIn("<svg", result["diagram"]["svg"])
+        self.assertIn("allow_diagram: true", generator_client.messages[0][1]["content"])
+        self.assertIn('"diagram_spec"', validator_client.messages[0][1]["content"])
 
     def test_chemistry_generation_uses_chemistry_curriculum_prompts(self):
         generator_client = FakeClient(
@@ -231,3 +273,14 @@ class AgentTests(unittest.TestCase):
         self.assertIn("--- Validator decision ---", trace)
         self.assertIn("passed=True", trace)
         self.assertIn("=== Final result: status=success ===", trace)
+
+    def test_request_rejects_diagrams_for_non_physics_subjects(self):
+        with self.assertRaisesRegex(ValueError, "allow_diagram"):
+            GenerateRequest.from_dict(
+                {
+                    "subject": "chemistry",
+                    "level": "Standard",
+                    "topic": "Acid-Base Titration",
+                    "allow_diagram": True,
+                }
+            )

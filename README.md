@@ -8,7 +8,7 @@ Supported subjects:
 - `physics`
 - `chemistry`
 
-Physics generation is text-only. The generator is instructed not to create diagrams, figures, image references, or questions that require a visual diagram to solve.
+Physics generation is text-only by default. When `allow_diagram` is enabled, the generator may return a structured `diagram_spec`; the server renders that spec to SVG.
 
 Chemistry generation is also text-only. The generator is instructed not to create diagrams, structural drawings, image references, or questions that require a visual diagram to solve.
 
@@ -71,6 +71,22 @@ curl -X POST http://127.0.0.1:8000/generate \
   -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics"}'
 ```
 
+Physics diagram example:
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics","allow_diagram":true}'
+```
+
+`allow_diagram` defaults to `false` and is currently supported only for physics. When enabled, the Generator may return a structured `diagram_spec`; the server renders it deterministically to SVG. The LLM is not allowed to output raw SVG directly.
+
+Supported `diagram_spec.kind` values:
+
+- `inclined_plane`
+- `force_diagram`
+- `circuit`
+
 Chemistry example:
 
 ```bash
@@ -85,9 +101,17 @@ curl -X POST http://127.0.0.1:8000/generate \
 {
   "status": "success",
   "problem": "Japanese question text including $LaTeX$",
-  "solution": "Japanese solution and explanation including $LaTeX$"
+  "solution": "Japanese solution and explanation including $LaTeX$",
+  "diagram": {
+    "type": "svg",
+    "description": "Optional diagram description",
+    "spec": {"kind": "inclined_plane"},
+    "svg": "<svg ...>...</svg>"
+  }
 }
 ```
+
+The `diagram` field is omitted when no diagram is generated.
 
 If the validator rejects all generation attempts, the API returns HTTP 422 with `status: "failed"` and the validator checklist result.
 
