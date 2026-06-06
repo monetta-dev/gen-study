@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Generated Problem Viewer</title>
+    <link rel="stylesheet" href="./styles.css">
+    <script>
+      window.MathJax = {
+        tex: {
+          inlineMath: [["$", "$"], ["\\(", "\\)"]],
+          displayMath: [["$$", "$$"], ["\\[", "\\]"]]
+        },
+        svg: { fontCache: "global" }
+      };
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+    <script defer src="./app.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="input-panel" aria-label="JSON input">
+        <div class="panel-header">
+          <div>
+            <h1>Generated Problem Viewer</h1>
+            <p>Paste or upload a `/generate` JSON response.</p>
+          </div>
+          <div class="actions">
+            <label class="file-button">
+              <input id="fileInput" type="file" accept="application/json,.json">
+              Upload
+            </label>
+            <button id="sampleButton" type="button">Sample</button>
+            <button id="renderButton" type="button">Render</button>
+          </div>
+        </div>
+        <textarea id="jsonInput" spellcheck="false" aria-label="Generated JSON"></textarea>
+        <p id="statusMessage" class="status" role="status"></p>
+      </section>
+
+      <section class="output-grid" aria-label="Rendered output">
+        <article class="output-section problem-section">
+          <div class="section-label">Problem</div>
+          <div id="problemOutput" class="rendered-text empty">No problem loaded.</div>
+        </article>
+
+        <article class="output-section solution-section">
+          <div class="section-label">Solution</div>
+          <div id="solutionOutput" class="rendered-text empty">No solution loaded.</div>
+        </article>
+
+        <article class="output-section diagram-section">
+          <div class="section-label">Diagram</div>
+          <div id="diagramMeta" class="diagram-meta">No diagram loaded.</div>
+          <div id="diagramOutput" class="diagram-output"></div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

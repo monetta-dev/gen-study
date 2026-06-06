@@ -132,6 +132,35 @@ If validation and repair attempts still fail, the API returns HTTP 422 with `sta
 
 For backward compatibility, requests without `subject` are treated as `mathematics`.
 
+## Viewer
+
+A static viewer is available at `viewer/index.html`. It renders generated JSON responses with LaTeX formatting and optional SVG diagrams.
+
+Open it directly in a browser:
+
+```bash
+xdg-open viewer/index.html
+```
+
+Or start a local static file server:
+
+```bash
+python3 -m http.server 8080
+```
+
+Then open `http://127.0.0.1:8080/viewer/`.
+
+Save an API response and load it in the viewer:
+
+```bash
+curl --max-time 600 -X POST http://127.0.0.1:8000/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics","allow_diagram":true}' \
+  -o generated-response.json
+```
+
+The viewer uses MathJax from a CDN, so LaTeX rendering needs browser access to that script. The raw text and SVG still display if MathJax is unavailable.
+
 ## Test
 
 ```bash
