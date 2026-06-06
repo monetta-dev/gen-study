@@ -115,23 +115,47 @@ def _optional_diagram_spec(data: dict[str, Any]) -> dict[str, Any] | None:
 
 
 @dataclass(frozen=True)
-class ValidationResult:
+class CriticalValidationResult:
     passed: bool
     solution_accurate: bool
-    curriculum_compliant: bool
     issues: tuple[str, ...]
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ValidationResult":
+    def from_dict(cls, data: dict[str, Any]) -> "CriticalValidationResult":
         passed = data.get("passed")
         solution_accurate = data.get("solution_accurate")
-        curriculum_compliant = data.get("curriculum_compliant")
         issues = data.get("issues", [])
 
         if not isinstance(passed, bool):
             raise ContractError("`passed` must be a boolean")
         if not isinstance(solution_accurate, bool):
             raise ContractError("`solution_accurate` must be a boolean")
+        if not isinstance(issues, list) or not all(
+            isinstance(issue, str) for issue in issues
+        ):
+            raise ContractError("`issues` must be an array of strings")
+
+        return cls(
+            passed=passed,
+            solution_accurate=solution_accurate,
+            issues=tuple(issue for issue in issues if issue.strip()),
+        )
+
+
+@dataclass(frozen=True)
+class ComplianceValidationResult:
+    passed: bool
+    curriculum_compliant: bool
+    issues: tuple[str, ...]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ComplianceValidationResult":
+        passed = data.get("passed")
+        curriculum_compliant = data.get("curriculum_compliant")
+        issues = data.get("issues", [])
+
+        if not isinstance(passed, bool):
+            raise ContractError("`passed` must be a boolean")
         if not isinstance(curriculum_compliant, bool):
             raise ContractError("`curriculum_compliant` must be a boolean")
         if not isinstance(issues, list) or not all(
@@ -141,10 +165,17 @@ class ValidationResult:
 
         return cls(
             passed=passed,
-            solution_accurate=solution_accurate,
             curriculum_compliant=curriculum_compliant,
             issues=tuple(issue for issue in issues if issue.strip()),
         )
+
+
+@dataclass(frozen=True)
+class ValidationResult:
+    passed: bool
+    solution_accurate: bool
+    curriculum_compliant: bool
+    issues: tuple[str, ...]
 
     def to_failure_response(self) -> dict[str, Any]:
         return {

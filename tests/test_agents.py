@@ -5,7 +5,8 @@ from mathgen.agents import (
     GeneratorAgent,
     InteractionTracer,
     MathGenerationService,
-    ValidatorAgent,
+    ComplianceValidatorAgent,
+    CriticalValidatorAgent,
 )
 from mathgen.models import GenerateRequest
 
@@ -29,14 +30,20 @@ class AgentTests(unittest.TestCase):
                 '{"problem":"$a_n$を求めよ。","solution":"漸化式より $a_n=n$。"}',
             ]
         )
-        validator_client = FakeClient(
+        critical_validator_client = FakeClient(
             [
-                '{"passed":true,"solution_accurate":true,"curriculum_compliant":true,"issues":[]}',
+                '{"passed":true,"solution_accurate":true,"issues":[]}',
+            ]
+        )
+        compliance_validator_client = FakeClient(
+            [
+                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
             ]
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            ValidatorAgent(validator_client),
+            CriticalValidatorAgent(critical_validator_client),
+            ComplianceValidatorAgent(compliance_validator_client),
         )
 
         result = service.generate_verified(
@@ -47,9 +54,9 @@ class AgentTests(unittest.TestCase):
         self.assertIn("problem", result)
         self.assertIn("solution", result)
         generator_system_prompt = generator_client.messages[0][0]["content"]
-        validator_system_prompt = validator_client.messages[0][0]["content"]
+        compliance_system_prompt = compliance_validator_client.messages[0][0]["content"]
         self.assertIn("Write both the problem and solution in Japanese", generator_system_prompt)
-        self.assertIn("Japanese Output", validator_system_prompt)
+        self.assertIn("Japanese Output", compliance_system_prompt)
         self.assertIn("mathematics", generator_system_prompt)
         self.assertIn("Subject: mathematics", generator_client.messages[0][1]["content"])
 
@@ -60,15 +67,21 @@ class AgentTests(unittest.TestCase):
                 '{"problem":"still bad","solution":"still bad"}',
             ]
         )
-        validator_client = FakeClient(
+        critical_validator_client = FakeClient(
             [
-                '{"passed":false,"solution_accurate":false,"curriculum_compliant":true,"issues":["calculation error"]}',
-                '{"passed":false,"solution_accurate":false,"curriculum_compliant":false,"issues":["out of scope"]}',
+                '{"passed":false,"solution_accurate":false,"issues":["calculation error"]}',
+                '{"passed":true,"solution_accurate":true,"issues":[]}',
+            ]
+        )
+        compliance_validator_client = FakeClient(
+            [
+                '{"passed":false,"curriculum_compliant":false,"issues":["out of scope"]}',
             ]
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            ValidatorAgent(validator_client),
+            CriticalValidatorAgent(critical_validator_client),
+            ComplianceValidatorAgent(compliance_validator_client),
             max_attempts=2,
         )
 
@@ -91,14 +104,20 @@ class AgentTests(unittest.TestCase):
                 '{"problem":"水平面上を動く小物体について答えよ。","solution":"運動方程式より求める。"}',
             ]
         )
-        validator_client = FakeClient(
+        critical_validator_client = FakeClient(
             [
-                '{"passed":true,"solution_accurate":true,"curriculum_compliant":true,"issues":[]}',
+                '{"passed":true,"solution_accurate":true,"issues":[]}',
+            ]
+        )
+        compliance_validator_client = FakeClient(
+            [
+                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
             ]
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            ValidatorAgent(validator_client),
+            CriticalValidatorAgent(critical_validator_client),
+            ComplianceValidatorAgent(compliance_validator_client),
         )
 
         result = service.generate_verified(
@@ -113,20 +132,21 @@ class AgentTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "success")
         generator_system_prompt = generator_client.messages[0][0]["content"]
-        validator_system_prompt = validator_client.messages[0][0]["content"]
-        validator_payload = validator_client.messages[0][1]["content"]
+        critical_system_prompt = critical_validator_client.messages[0][0]["content"]
+        compliance_system_prompt = compliance_validator_client.messages[0][0]["content"]
+        compliance_payload = compliance_validator_client.messages[0][1]["content"]
         self.assertIn("physics", generator_system_prompt)
         self.assertIn("Do not output raw diagrams", generator_system_prompt)
         self.assertIn("allow_diagram is false", generator_system_prompt)
         self.assertIn("Japanese high school physics curriculum guidelines", generator_system_prompt)
-        self.assertIn("Text-only Requirement", validator_system_prompt)
-        self.assertIn("Diagram Consistency", validator_system_prompt)
-        self.assertIn("extract the required knowledge", validator_system_prompt)
-        self.assertIn("Judge whether each item is taught", validator_system_prompt)
-        self.assertIn("High difficulty means harder combinations", validator_system_prompt)
-        self.assertIn("not university-level subject knowledge or mathematics", validator_system_prompt)
-        self.assertIn('"subject": "physics"', validator_payload)
-        self.assertIn('"allow_diagram": false', validator_payload)
+        self.assertIn("genuine errors or inconsistencies", critical_system_prompt)
+        self.assertIn("Diagram Policy", compliance_system_prompt)
+        self.assertIn("extract the required knowledge", compliance_system_prompt)
+        self.assertIn("Judge whether each item is taught", compliance_system_prompt)
+        self.assertIn("High difficulty means harder combinations", compliance_system_prompt)
+        self.assertIn("not university-level subject knowledge or mathematics", compliance_system_prompt)
+        self.assertIn('"subject": "physics"', compliance_payload)
+        self.assertIn('"allow_diagram": false', compliance_payload)
 
     def test_physics_generation_with_diagram_renders_svg_response(self):
         generator_client = FakeClient(
@@ -139,14 +159,20 @@ class AgentTests(unittest.TestCase):
                 ),
             ]
         )
-        validator_client = FakeClient(
+        critical_validator_client = FakeClient(
             [
-                '{"passed":true,"solution_accurate":true,"curriculum_compliant":true,"issues":[]}',
+                '{"passed":true,"solution_accurate":true,"issues":[]}',
+            ]
+        )
+        compliance_validator_client = FakeClient(
+            [
+                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
             ]
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            ValidatorAgent(validator_client),
+            CriticalValidatorAgent(critical_validator_client),
+            ComplianceValidatorAgent(compliance_validator_client),
         )
 
         result = service.generate_verified(
@@ -166,7 +192,8 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(result["diagram"]["spec"]["kind"], "inclined_plane")
         self.assertIn("<svg", result["diagram"]["svg"])
         self.assertIn("allow_diagram: true", generator_client.messages[0][1]["content"])
-        self.assertIn('"diagram_spec"', validator_client.messages[0][1]["content"])
+        self.assertIn('"diagram_spec"', critical_validator_client.messages[0][1]["content"])
+        self.assertIn('"diagram_spec"', compliance_validator_client.messages[0][1]["content"])
 
     def test_chemistry_generation_uses_chemistry_curriculum_prompts(self):
         generator_client = FakeClient(
@@ -174,14 +201,20 @@ class AgentTests(unittest.TestCase):
                 '{"problem":"酢酸水溶液の中和滴定について答えよ。","solution":"物質量の関係より求める。"}',
             ]
         )
-        validator_client = FakeClient(
+        critical_validator_client = FakeClient(
             [
-                '{"passed":true,"solution_accurate":true,"curriculum_compliant":true,"issues":[]}',
+                '{"passed":true,"solution_accurate":true,"issues":[]}',
+            ]
+        )
+        compliance_validator_client = FakeClient(
+            [
+                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
             ]
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            ValidatorAgent(validator_client),
+            CriticalValidatorAgent(critical_validator_client),
+            ComplianceValidatorAgent(compliance_validator_client),
         )
 
         result = service.generate_verified(
@@ -196,18 +229,20 @@ class AgentTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "success")
         generator_system_prompt = generator_client.messages[0][0]["content"]
-        validator_system_prompt = validator_client.messages[0][0]["content"]
-        validator_payload = validator_client.messages[0][1]["content"]
+        critical_system_prompt = critical_validator_client.messages[0][0]["content"]
+        compliance_system_prompt = compliance_validator_client.messages[0][0]["content"]
+        compliance_payload = compliance_validator_client.messages[0][1]["content"]
         self.assertIn("chemistry", generator_system_prompt)
         self.assertIn("Japanese high school chemistry curriculum guidelines", generator_system_prompt)
         self.assertIn("Use only text", generator_system_prompt)
         self.assertIn("do not generate diagrams, structural drawings", generator_system_prompt)
         self.assertIn("reaction equations", generator_system_prompt)
-        self.assertIn("Text-only Requirement", validator_system_prompt)
-        self.assertIn("extract the required knowledge", validator_system_prompt)
-        self.assertIn("not university-level subject knowledge or mathematics", validator_system_prompt)
-        self.assertIn("chemistry flaws", validator_system_prompt)
-        self.assertIn('"subject": "chemistry"', validator_payload)
+        self.assertIn("genuine errors or inconsistencies", critical_system_prompt)
+        self.assertIn("chemistry flaws", critical_system_prompt)
+        self.assertIn("Diagram Policy", compliance_system_prompt)
+        self.assertIn("extract the required knowledge", compliance_system_prompt)
+        self.assertIn("not university-level subject knowledge or mathematics", compliance_system_prompt)
+        self.assertIn('"subject": "chemistry"', compliance_payload)
 
     def test_request_accepts_subject_aliases_and_rejects_unknown_subjects(self):
         self.assertEqual(
@@ -242,14 +277,20 @@ class AgentTests(unittest.TestCase):
                 '{"problem":"磁場中の荷電粒子について答えよ。","solution":"ローレンツ力より求める。"}',
             ]
         )
-        validator_client = FakeClient(
+        critical_validator_client = FakeClient(
             [
-                '{"passed":true,"solution_accurate":true,"curriculum_compliant":true,"issues":[]}',
+                '{"passed":true,"solution_accurate":true,"issues":[]}',
+            ]
+        )
+        compliance_validator_client = FakeClient(
+            [
+                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
             ]
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client, tracer=tracer),
-            ValidatorAgent(validator_client, tracer=tracer),
+            CriticalValidatorAgent(critical_validator_client, tracer=tracer),
+            ComplianceValidatorAgent(compliance_validator_client, tracer=tracer),
             tracer=tracer,
         )
 
@@ -268,9 +309,12 @@ class AgentTests(unittest.TestCase):
         self.assertIn("--- Generator request ---", trace)
         self.assertIn("Subject: physics", trace)
         self.assertIn("--- Generator response ---", trace)
-        self.assertIn("--- Validator request ---", trace)
-        self.assertIn("--- Validator response ---", trace)
-        self.assertIn("--- Validator decision ---", trace)
+        self.assertIn("--- CriticalValidator request ---", trace)
+        self.assertIn("--- CriticalValidator response ---", trace)
+        self.assertIn("--- CriticalValidator decision ---", trace)
+        self.assertIn("--- ComplianceValidator request ---", trace)
+        self.assertIn("--- ComplianceValidator response ---", trace)
+        self.assertIn("--- ComplianceValidator decision ---", trace)
         self.assertIn("passed=True", trace)
         self.assertIn("=== Final result: status=success ===", trace)
 

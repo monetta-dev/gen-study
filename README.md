@@ -1,6 +1,6 @@
 # Entrance Exam Question Generation & Verification API
 
-Python backend API for generating and validating Japanese university entrance exam questions with two independent DeepSeek V4 Pro agents.
+Python backend API for generating and validating Japanese university entrance exam questions with independent DeepSeek V4 Pro agents.
 
 Supported subjects:
 
@@ -53,7 +53,16 @@ To see each Generator and Validator exchange in the server terminal, set:
 GENERATION_TRACE=true
 ```
 
-The trace shows the prompts sent to each agent, the JSON content returned by each agent, and the validator decision. It does not expose private model thinking tokens; DeepSeek uses thinking internally and returns the final message content.
+The trace shows the prompts sent to each agent, the JSON content returned by each agent, and both validator decisions. It does not expose private model thinking tokens; DeepSeek uses thinking internally and returns the final message content.
+
+## Validation Flow
+
+Each generation attempt is checked by two focused validators:
+
+1. `CriticalValidator` checks genuine correctness issues: calculation errors, invalid equations, unit errors, logical gaps, contradictions, missing conditions, and problem/solution/diagram inconsistencies.
+2. `ComplianceValidator` checks system acceptance: Japanese curriculum scope, Japanese output, subject/topic alignment, and diagram policy.
+
+The API retries generation when either validator rejects the candidate. The external success and failure response shapes remain unchanged.
 
 ## Request
 

@@ -4,7 +4,12 @@ import unittest
 import urllib.error
 import urllib.request
 
-from mathgen.agents import GeneratorAgent, MathGenerationService, ValidatorAgent
+from mathgen.agents import (
+    ComplianceValidatorAgent,
+    CriticalValidatorAgent,
+    GeneratorAgent,
+    MathGenerationService,
+)
 from mathgen.api import MathGenerationHandler, create_server
 
 
@@ -73,10 +78,11 @@ class ApiTests(unittest.TestCase):
     def test_generate_endpoint_returns_verified_problem(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient(['{"problem":"問 $x$","solution":"解 $x=1$"}'])),
-            ValidatorAgent(
-                FakeClient(
-                    ['{"passed":true,"solution_accurate":true,"curriculum_compliant":true,"issues":[]}']
-                )
+            CriticalValidatorAgent(
+                FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
+            ),
+            ComplianceValidatorAgent(
+                FakeClient(['{"passed":true,"curriculum_compliant":true,"issues":[]}'])
             ),
         )
         server = self.start_server(service)
@@ -93,7 +99,8 @@ class ApiTests(unittest.TestCase):
     def test_generate_endpoint_rejects_invalid_request(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient([])),
-            ValidatorAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
         )
         server = self.start_server(service)
 
@@ -110,7 +117,8 @@ class ApiTests(unittest.TestCase):
     def test_generate_endpoint_returns_json_for_unexpected_errors(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient([RuntimeError("provider disconnected")])),
-            ValidatorAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
         )
         server = self.start_server(service)
 
