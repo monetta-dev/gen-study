@@ -123,8 +123,49 @@ class AgentTests(unittest.TestCase):
         self.assertIn("extract the required knowledge", validator_system_prompt)
         self.assertIn("Judge whether each item is taught", validator_system_prompt)
         self.assertIn("High difficulty means harder combinations", validator_system_prompt)
-        self.assertIn("not university-level physics or mathematics", validator_system_prompt)
+        self.assertIn("not university-level subject knowledge or mathematics", validator_system_prompt)
         self.assertIn('"subject": "physics"', validator_payload)
+
+    def test_chemistry_generation_uses_chemistry_curriculum_prompts(self):
+        generator_client = FakeClient(
+            [
+                '{"problem":"酢酸水溶液の中和滴定について答えよ。","solution":"物質量の関係より求める。"}',
+            ]
+        )
+        validator_client = FakeClient(
+            [
+                '{"passed":true,"solution_accurate":true,"curriculum_compliant":true,"issues":[]}',
+            ]
+        )
+        service = MathGenerationService(
+            GeneratorAgent(generator_client),
+            ValidatorAgent(validator_client),
+        )
+
+        result = service.generate_verified(
+            GenerateRequest.from_dict(
+                {
+                    "subject": "chemistry",
+                    "level": "University of Tokyo",
+                    "topic": "Acid-Base Titration",
+                }
+            )
+        )
+
+        self.assertEqual(result["status"], "success")
+        generator_system_prompt = generator_client.messages[0][0]["content"]
+        validator_system_prompt = validator_client.messages[0][0]["content"]
+        validator_payload = validator_client.messages[0][1]["content"]
+        self.assertIn("chemistry", generator_system_prompt)
+        self.assertIn("Japanese high school chemistry curriculum guidelines", generator_system_prompt)
+        self.assertIn("Use only text", generator_system_prompt)
+        self.assertIn("do not generate diagrams, structural drawings", generator_system_prompt)
+        self.assertIn("reaction equations", generator_system_prompt)
+        self.assertIn("Text-only Requirement", validator_system_prompt)
+        self.assertIn("extract the required knowledge", validator_system_prompt)
+        self.assertIn("not university-level subject knowledge or mathematics", validator_system_prompt)
+        self.assertIn("chemistry flaws", validator_system_prompt)
+        self.assertIn('"subject": "chemistry"', validator_payload)
 
     def test_request_accepts_subject_aliases_and_rejects_unknown_subjects(self):
         self.assertEqual(
@@ -139,10 +180,16 @@ class AgentTests(unittest.TestCase):
             ).subject,
             "mathematics",
         )
+        self.assertEqual(
+            GenerateRequest.from_dict(
+                {"subject": "化学", "level": "Standard", "topic": "Chemical Equilibrium"}
+            ).subject,
+            "chemistry",
+        )
 
         with self.assertRaisesRegex(ValueError, "subject"):
             GenerateRequest.from_dict(
-                {"subject": "chemistry", "level": "Standard", "topic": "Moles"}
+                {"subject": "biology", "level": "Standard", "topic": "Cells"}
             )
 
     def test_interaction_tracer_logs_generation_and_validation_flow(self):

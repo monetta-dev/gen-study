@@ -6,8 +6,9 @@ import json
 import sys
 from typing import Protocol
 
+from .diagrams import render_diagram
 from .json_utils import parse_json_object
-from .models import GenerateRequest, GeneratedProblem, ValidationResult
+from .models import ContractError, GenerateRequest, GeneratedProblem, ValidationResult
 
 
 class ChatClient(Protocol):
@@ -94,15 +95,40 @@ SUBJECT_INSTRUCTIONS = {
             "and existence of a valid solution"
         ),
         "constraints": (
-            "Use only text; do not generate diagrams, figures, image references, or "
-            "questions that require a diagram to solve. Describe any physical setup "
-            "completely in words. Mathematical and physical expressions must be "
-            "written in LaTeX using $...$ or $$...$$."
+            "Do not output raw diagrams, figures, image references, or SVG. If "
+            "allow_diagram is false, the problem must be fully text-only and must "
+            "not require a diagram to solve. If allow_diagram is true, you may "
+            "include a structured diagram_spec object when it improves clarity. "
+            "Mathematical and physical expressions must be written in LaTeX using "
+            "$...$ or $$...$$."
         ),
         "rejection_scope": (
             "physics flaws, incorrect units, missing assumptions, insufficient "
             "conditions, diagram-dependent wording, redundant contradictory "
             "conditions, or out-of-scope methods"
+        ),
+    },
+    "chemistry": {
+        "generator_role": "an independent chemistry exam author",
+        "subject_name": "chemistry",
+        "curriculum_scope": "Japanese high school chemistry curriculum guidelines",
+        "accuracy_scope": (
+            "chemical concepts, formulas, reaction equations, stoichiometry, units, "
+            "numerical calculations, assumptions, and existence of a valid solution"
+        ),
+        "constraints": (
+            "Use only text; do not generate diagrams, structural drawings, image "
+            "references, or questions that require a visual diagram to solve. "
+            "Describe any experimental setup, molecular structure, or reaction "
+            "conditions completely in words. Chemical formulas, reaction equations, "
+            "and mathematical expressions must be written in text or LaTeX using "
+            "$...$ or $$...$$."
+        ),
+        "rejection_scope": (
+            "chemistry flaws, incorrect chemical formulas or reaction equations, "
+            "incorrect units, missing assumptions, insufficient conditions, "
+            "diagram-dependent wording, redundant contradictory conditions, or "
+            "out-of-scope methods"
         ),
     },
 }
@@ -121,7 +147,8 @@ Write both the problem and solution in Japanese.
 The problem must be solvable within the {instruction["curriculum_scope"]}.
 {instruction["constraints"]}
 Return exactly this JSON shape:
-{{"problem":"...","solution":"..."}}"""
+{{"problem":"...","solution":"...","diagram_spec":null}}
+If the user sets allow_diagram to true for physics and a diagram would make the problem clearer, include a structured diagram_spec object instead of null. Do not output raw SVG. Supported diagram_spec kinds are "inclined_plane", "force_diagram", and "circuit". If no diagram is needed, use null."""
 
 
 def validator_system_prompt(subject: str) -> str:
@@ -131,9 +158,10 @@ Evaluate the generated problem and solution using this mandatory checklist:
 1. Accuracy of Solution: {instruction["accuracy_scope"]}.
 2. Curriculum Compliance: solvable without knowledge beyond the {instruction["curriculum_scope"]}.
 3. Japanese Output: the final problem and solution text are written in Japanese, with only mathematical notation, symbols, variable names, units, and standard terms left as needed.
-4. Text-only Requirement: for physics, reject any problem that requires a diagram, figure, image, or visual reference to solve.
+4. Text-only Requirement: for physics and chemistry, reject any problem that requires a diagram, figure, structural drawing, image, or visual reference to solve.
+5. Diagram Consistency: if a diagram_spec is provided, check whether it is necessary, sufficient, and consistent with the problem and solution labels, directions, quantities, and conditions. Reject diagram-dependent problems when no diagram_spec is provided.
 Before deciding, extract the required knowledge, concepts, laws, formulas, and mathematical methods used in the problem and solution. Judge whether each item is taught within the subject curriculum and prerequisite Japanese high school mathematics. Reject if solving requires any item outside that scope, even when the final answer is correct.
-High difficulty means harder combinations of high-school methods, not university-level physics or mathematics.
+High difficulty means harder combinations of high-school methods, not university-level subject knowledge or mathematics.
 Reject problems with {instruction["rejection_scope"]}.
 Use DeepSeek thinking internally, but output only strict JSON.
 Return exactly this JSON shape:
@@ -153,10 +181,11 @@ class GeneratorAgent:
             {
                 "role": "user",
                 "content": (
-                    f"Generate one entrance exam {request.subject} question with solution.\n"
-                    f"Subject: {request.subject}\n"
-                    f"Difficulty level: {request.level}\n"
-                    f"Topic: {request.topic}"
+                        f"Generate one entrance exam {request.subject} question with solution.\n"
+                        f"Subject: {request.subject}\n"
+                        f"Difficulty level: {request.level}\n"
+                        f"Topic: {request.topic}\n"
+                        f"allow_diagram: {str(request.allow_diagram).lower()}"
                 ),
             },
         ]
@@ -181,13 +210,15 @@ class ValidatorAgent:
             {
                 "role": "user",
                 "content": json.dumps(
-                    {
-                        "subject": request.subject,
-                        "level": request.level,
-                        "topic": request.topic,
-                        "problem": generated.problem,
-                        "solution": generated.solution,
-                    },
+                        {
+                            "subject": request.subject,
+                            "level": request.level,
+                            "topic": request.topic,
+                            "allow_diagram": request.allow_diagram,
+                            "problem": generated.problem,
+                            "solution": generated.solution,
+                            "diagram_spec": generated.diagram_spec,
+                        },
                     ensure_ascii=False,
                 ),
             },
@@ -221,9 +252,27 @@ class MathGenerationService:
         for attempt in range(1, self.max_attempts + 1):
             self.tracer.log_attempt(attempt, request)
             generated = self.generator.generate(request)
+            if generated.diagram_spec is not None and not request.allow_diagram:
+                last_validation = ValidationResult(
+                    passed=False,
+                    solution_accurate=True,
+                    curriculum_compliant=False,
+                    issues=("diagram_spec was returned when allow_diagram was false",),
+                )
+                continue
+            try:
+                rendered_diagram = render_diagram(generated.diagram_spec)
+            except ContractError as exc:
+                last_validation = ValidationResult(
+                    passed=False,
+                    solution_accurate=True,
+                    curriculum_compliant=False,
+                    issues=(str(exc),),
+                )
+                continue
             validation = self.validator.validate(request, generated)
             if validation.passed:
-                result = generated.to_success_response()
+                result = generated.to_success_response(rendered_diagram)
                 self.tracer.log_final_result(result)
                 return result
             last_validation = validation

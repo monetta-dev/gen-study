@@ -6,8 +6,11 @@ Supported subjects:
 
 - `mathematics`
 - `physics`
+- `chemistry`
 
 Physics generation is text-only. The generator is instructed not to create diagrams, figures, image references, or questions that require a visual diagram to solve.
+
+Chemistry generation is also text-only. The generator is instructed not to create diagrams, structural drawings, image references, or questions that require a visual diagram to solve.
 
 ## Requirements
 
@@ -66,6 +69,14 @@ Physics example:
 curl -X POST http://127.0.0.1:8000/generate \
   -H 'Content-Type: application/json' \
   -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics"}'
+```
+
+Chemistry example:
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"subject":"chemistry","level":"University of Tokyo","topic":"Acid-Base Titration"}'
 ```
 
 ## Successful Response

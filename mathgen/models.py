@@ -22,17 +22,35 @@ class GenerateRequest:
     level: str
     topic: str
     subject: str = "mathematics"
+    allow_diagram: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GenerateRequest":
+        subject = _subject_string(data)
+        allow_diagram = _optional_bool(data, "allow_diagram")
+        if allow_diagram and subject != "physics":
+            raise ContractError("`allow_diagram` is currently supported only for physics")
         return cls(
             level=_required_string(data, "level"),
             topic=_required_string(data, "topic"),
-            subject=_subject_string(data),
+            subject=subject,
+            allow_diagram=allow_diagram,
         )
 
-    def to_dict(self) -> dict[str, str]:
-        return {"level": self.level, "topic": self.topic, "subject": self.subject}
+    def to_dict(self) -> dict[str, str | bool]:
+        return {
+            "level": self.level,
+            "topic": self.topic,
+            "subject": self.subject,
+            "allow_diagram": self.allow_diagram,
+        }
+
+
+def _optional_bool(data: dict[str, Any], field: str) -> bool:
+    value = data.get(field, False)
+    if not isinstance(value, bool):
+        raise ContractError(f"`{field}` must be a boolean")
+    return value
 
 
 def _subject_string(data: dict[str, Any]) -> str:
@@ -47,10 +65,13 @@ def _subject_string(data: dict[str, Any]) -> str:
         "数学": "mathematics",
         "physics": "physics",
         "物理": "physics",
+        "chem": "chemistry",
+        "chemistry": "chemistry",
+        "化学": "chemistry",
     }
     subject = aliases.get(normalized)
     if subject is None:
-        raise ContractError("`subject` must be `mathematics` or `physics`")
+        raise ContractError("`subject` must be `mathematics`, `physics`, or `chemistry`")
     return subject
 
 
@@ -58,20 +79,39 @@ def _subject_string(data: dict[str, Any]) -> str:
 class GeneratedProblem:
     problem: str
     solution: str
+    diagram_spec: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "GeneratedProblem":
         return cls(
             problem=_required_string(data, "problem"),
             solution=_required_string(data, "solution"),
+            diagram_spec=_optional_diagram_spec(data),
         )
 
-    def to_success_response(self) -> dict[str, str]:
-        return {
+    def to_success_response(
+        self, diagram: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        response: dict[str, Any] = {
             "status": "success",
             "problem": self.problem,
             "solution": self.solution,
         }
+        if diagram is not None:
+            response["diagram"] = diagram
+        return response
+
+
+def _optional_diagram_spec(data: dict[str, Any]) -> dict[str, Any] | None:
+    if "diagram_spec" not in data or data["diagram_spec"] is None:
+        return None
+    value = data["diagram_spec"]
+    if not isinstance(value, dict):
+        raise ContractError("`diagram_spec` must be an object or null")
+    kind = value.get("kind")
+    if not isinstance(kind, str) or not kind.strip():
+        raise ContractError("`diagram_spec.kind` must be a non-empty string")
+    return value
 
 
 @dataclass(frozen=True)

@@ -130,7 +130,7 @@ def main() -> None:
     print("Serving exam question generation API on http://127.0.0.1:8000")
     print(
         "POST /generate with JSON: "
-        "{\"subject\":\"physics\",\"level\":\"University of Tokyo\",\"topic\":\"Mechanics\"}"
+        "{\"subject\":\"chemistry\",\"level\":\"University of Tokyo\",\"topic\":\"Acid-Base Titration\"}"
     )
     server.serve_forever()
 
