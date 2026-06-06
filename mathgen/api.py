@@ -9,11 +9,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from .agents import (
+    AdjudicatorAgent,
     ComplianceValidatorAgent,
     CriticalValidatorAgent,
     GeneratorAgent,
     InteractionTracer,
     MathGenerationService,
+    RepairAgent,
 )
 from .deepseek import DeepSeekClient, DeepSeekError
 from .env import load_dotenv
@@ -24,10 +26,14 @@ def build_service() -> MathGenerationService:
     load_dotenv()
     tracer = InteractionTracer(enabled=_env_flag("GENERATION_TRACE"))
     generator_client = DeepSeekClient()
+    adjudicator_client = DeepSeekClient()
+    repair_client = DeepSeekClient()
     critical_validator_client = DeepSeekClient()
     compliance_validator_client = DeepSeekClient()
     return MathGenerationService(
         generator=GeneratorAgent(generator_client, tracer=tracer),
+        adjudicator=AdjudicatorAgent(adjudicator_client, tracer=tracer),
+        repair_agent=RepairAgent(repair_client, tracer=tracer),
         critical_validator=CriticalValidatorAgent(
             critical_validator_client, tracer=tracer
         ),

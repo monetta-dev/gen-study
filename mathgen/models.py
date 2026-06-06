@@ -171,6 +171,40 @@ class ComplianceValidationResult:
 
 
 @dataclass(frozen=True)
+class AdjudicationResult:
+    decision: str
+    reason: str
+    repair_focus: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AdjudicationResult":
+        decision = data.get("decision")
+        reason = data.get("reason")
+        repair_focus = data.get("repair_focus", "")
+
+        allowed_decisions = {
+            "repair_required",
+            "validator_false_positive",
+            "clarify_definition_required",
+        }
+        if decision not in allowed_decisions:
+            raise ContractError(
+                "`decision` must be `repair_required`, "
+                "`validator_false_positive`, or `clarify_definition_required`"
+            )
+        if not isinstance(reason, str) or not reason.strip():
+            raise ContractError("`reason` must be a non-empty string")
+        if not isinstance(repair_focus, str):
+            raise ContractError("`repair_focus` must be a string")
+
+        return cls(
+            decision=decision,
+            reason=reason.strip(),
+            repair_focus=repair_focus.strip(),
+        )
+
+
+@dataclass(frozen=True)
 class ValidationResult:
     passed: bool
     solution_accurate: bool

@@ -53,16 +53,22 @@ To see each Generator and Validator exchange in the server terminal, set:
 GENERATION_TRACE=true
 ```
 
-The trace shows the prompts sent to each agent, the JSON content returned by each agent, and both validator decisions. It does not expose private model thinking tokens; DeepSeek uses thinking internally and returns the final message content.
+The trace shows the prompts sent to each agent, the JSON content returned by each agent, validator decisions, adjudicator decisions, and repair exchanges. It does not expose private model thinking tokens; DeepSeek uses thinking internally and returns the final message content.
 
 ## Validation Flow
 
 Each generation attempt is checked by two focused validators:
 
 1. `CriticalValidator` checks genuine correctness issues: calculation errors, invalid equations, unit errors, logical gaps, contradictions, missing conditions, and problem/solution/diagram inconsistencies.
-2. `ComplianceValidator` checks system acceptance: Japanese curriculum scope, Japanese output, subject/topic alignment, and diagram policy.
+2. `ComplianceValidator` checks system acceptance: Japanese curriculum scope, Japanese output, subject/topic alignment, requested level alignment, and diagram policy.
 
-The API retries generation when either validator rejects the candidate. The external success and failure response shapes remain unchanged.
+When either validator rejects a candidate, `Adjudicator` first determines whether the finding is valid:
+
+- `repair_required`: send the candidate and validator issues to `RepairAgent`.
+- `validator_false_positive`: ignore the validator finding and continue or accept.
+- `clarify_definition_required`: send the candidate to `RepairAgent` with a clarification focus.
+
+The repair agent revises the same candidate and validation runs again. By default the API performs one initial generation and up to three repairs. The external success and failure response shapes remain unchanged.
 
 ## Request
 
@@ -122,7 +128,7 @@ curl -X POST http://127.0.0.1:8000/generate \
 
 The `diagram` field is omitted when no diagram is generated.
 
-If the validator rejects all generation attempts, the API returns HTTP 422 with `status: "failed"` and the validator checklist result.
+If validation and repair attempts still fail, the API returns HTTP 422 with `status: "failed"` and the latest validator issues.
 
 For backward compatibility, requests without `subject` are treated as `mathematics`.
 
