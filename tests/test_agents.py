@@ -264,6 +264,157 @@ class AgentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "topic"):
             GenerateRequest.from_dict({"level": "University of Tokyo"})
 
+    def test_empty_diagram_spec_is_treated_as_no_diagram(self):
+        generator_client = FakeClient(
+            [
+                '{"problem":"問","solution":"解","diagram_spec":{}}',
+            ]
+        )
+        critical_validator_client = FakeClient(
+            [
+                '{"passed":true,"solution_accurate":true,"issues":[]}',
+            ]
+        )
+        compliance_validator_client = FakeClient(
+            [
+                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
+            ]
+        )
+        service = MathGenerationService(
+            GeneratorAgent(generator_client),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(critical_validator_client),
+            ComplianceValidatorAgent(compliance_validator_client),
+        )
+
+        result = service.generate_verified(
+            GenerateRequest.from_dict(
+                {
+                    "subject": "physics",
+                    "level": "Standard",
+                    "topic": "Mechanics",
+                    "allow_diagram": True,
+                }
+            )
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertNotIn("diagram", result)
+
+    def test_malformed_scene_diagram_is_repaired_with_coordinate_feedback(self):
+        generator_client = FakeClient(
+            [
+                (
+                    '{"problem":"図を用いる問題","solution":"解",'
+                    '"diagram_spec":{"kind":"scene","objects":['
+                    '{"type":"circle","center":{"x":100,"y":100},"radius":20}]}}'
+                ),
+            ]
+        )
+        repair_client = FakeClient(
+            [
+                (
+                    '{"problem":"図を用いる問題","solution":"解",'
+                    '"diagram_spec":{"kind":"scene","objects":['
+                    '{"type":"circle","center":[100,100],"radius":20}]}}'
+                ),
+            ]
+        )
+        critical_validator_client = FakeClient(
+            [
+                '{"passed":true,"solution_accurate":true,"issues":[]}',
+            ]
+        )
+        compliance_validator_client = FakeClient(
+            [
+                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
+            ]
+        )
+        service = MathGenerationService(
+            GeneratorAgent(generator_client),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(repair_client),
+            CriticalValidatorAgent(critical_validator_client),
+            ComplianceValidatorAgent(compliance_validator_client),
+            max_repair_attempts=1,
+        )
+
+        result = service.generate_verified(
+            GenerateRequest.from_dict(
+                {
+                    "subject": "physics",
+                    "level": "Standard",
+                    "topic": "Mechanics",
+                    "allow_diagram": True,
+                }
+            )
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn("diagram", result)
+        repair_payload = repair_client.messages[0][1]["content"]
+        self.assertIn("diagram_rendering", repair_payload)
+        self.assertIn("center", repair_payload)
+        self.assertIn("two-number arrays like [300, 230]", repair_payload)
+
+    def test_non_empty_diagram_without_kind_is_repaired(self):
+        generator_client = FakeClient(
+            [
+                (
+                    '{"problem":"図を用いる問題","solution":"解",'
+                    '"diagram_spec":{"objects":['
+                    '{"type":"circle","center":[100,100],"radius":20}]}}'
+                ),
+            ]
+        )
+        repair_client = FakeClient(
+            [
+                (
+                    '{"problem":"図を用いる問題","solution":"解",'
+                    '"diagram_spec":{"kind":"scene","objects":['
+                    '{"type":"circle","center":[100,100],"radius":20}]}}'
+                ),
+            ]
+        )
+        critical_validator_client = FakeClient(
+            [
+                '{"passed":true,"solution_accurate":true,"issues":[]}',
+            ]
+        )
+        compliance_validator_client = FakeClient(
+            [
+                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
+            ]
+        )
+        service = MathGenerationService(
+            GeneratorAgent(generator_client),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(repair_client),
+            CriticalValidatorAgent(critical_validator_client),
+            ComplianceValidatorAgent(compliance_validator_client),
+            max_repair_attempts=1,
+        )
+
+        result = service.generate_verified(
+            GenerateRequest.from_dict(
+                {
+                    "subject": "physics",
+                    "level": "Standard",
+                    "topic": "Mechanics",
+                    "allow_diagram": True,
+                }
+            )
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn("diagram", result)
+        self.assertEqual(result["diagram"]["spec"]["kind"], "scene")
+        repair_payload = repair_client.messages[0][1]["content"]
+        self.assertIn("diagram_rendering", repair_payload)
+        self.assertIn("diagram_spec.kind", repair_payload)
+        self.assertIn("include a valid diagram_spec.kind such as scene", repair_payload)
+
     def test_physics_generation_uses_physics_text_only_prompts(self):
         generator_client = FakeClient(
             [
@@ -306,6 +457,8 @@ class AgentTests(unittest.TestCase):
         self.assertIn("physics", generator_system_prompt)
         self.assertIn("Do not output raw diagrams", generator_system_prompt)
         self.assertIn("allow_diagram is false", generator_system_prompt)
+        self.assertIn('Prefer diagram_spec kind "scene"', generator_system_prompt)
+        self.assertIn("line, arrow, rect, circle, arc, text, polyline, and path", generator_system_prompt)
         self.assertIn("Japanese high school physics curriculum guidelines", generator_system_prompt)
         self.assertIn("genuine errors or inconsistencies", critical_system_prompt)
         self.assertIn("Level Alignment", compliance_system_prompt)

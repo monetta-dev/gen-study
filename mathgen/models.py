@@ -108,9 +108,17 @@ def _optional_diagram_spec(data: dict[str, Any]) -> dict[str, Any] | None:
     value = data["diagram_spec"]
     if not isinstance(value, dict):
         raise ContractError("`diagram_spec` must be an object or null")
+    if not value:
+        return None
     kind = value.get("kind")
-    if not isinstance(kind, str) or not kind.strip():
-        raise ContractError("`diagram_spec.kind` must be a non-empty string")
+    if (
+        len(value) == 1
+        and "kind" in value
+        and (kind is None or (isinstance(kind, str) and not kind.strip()))
+    ):
+        return None
+    # Detailed diagram schema validation belongs to the renderer so malformed
+    # non-empty LLM diagram specs can be repaired instead of failing the API.
     return value
 
 

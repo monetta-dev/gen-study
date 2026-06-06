@@ -178,7 +178,7 @@ The problem must be solvable within the {instruction["curriculum_scope"]}.
 {instruction["constraints"]}
 Return exactly this JSON shape:
 {{"problem":"...","solution":"...","diagram_spec":null}}
-If the user sets allow_diagram to true for physics and a diagram would make the problem clearer, include a structured diagram_spec object instead of null. Do not output raw SVG. Supported diagram_spec kinds are "inclined_plane", "force_diagram", and "circuit". If no diagram is needed, use null."""
+If the user sets allow_diagram to true for physics and a diagram would make the problem clearer, include a structured diagram_spec object instead of null. Do not output raw SVG. Prefer diagram_spec kind "scene" for new diagrams. A scene uses {{"kind":"scene","canvas":{{"width":640,"height":420}},"objects":[...]}} with safe primitives: line, arrow, rect, circle, arc, text, polyline, and path. Legacy supported diagram_spec kinds are "inclined_plane", "force_diagram", and "circuit". If no diagram is needed, use null."""
 
 
 def critical_validator_system_prompt(subject: str) -> str:
@@ -492,7 +492,13 @@ class MathGenerationService:
                     AdjudicationResult(
                         decision="repair_required",
                         reason="diagram_spec could not be rendered",
-                        repair_focus="fix diagram_spec so it matches a supported schema",
+                        repair_focus=(
+                            "fix diagram_spec so it matches a supported schema; "
+                            "include a valid diagram_spec.kind such as scene; "
+                            "for scene objects, coordinate fields such as center, "
+                            "from, to, position, and each points entry must be "
+                            "two-number arrays like [300, 230]"
+                        ),
                     ),
                 )
                 if generated is None:

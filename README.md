@@ -98,9 +98,29 @@ curl -X POST http://127.0.0.1:8000/generate \
 
 Supported `diagram_spec.kind` values:
 
+- `scene`
 - `inclined_plane`
 - `force_diagram`
 - `circuit`
+
+For new diagrams, prefer `scene`. It is a general compositional format with a canvas and safe drawing primitives:
+
+```json
+{
+  "kind": "scene",
+  "description": "斜面上の物体にはたらく力",
+  "canvas": {"width": 640, "height": 420},
+  "objects": [
+    {"type": "line", "from": [80, 340], "to": [540, 160], "label": "斜面"},
+    {"type": "rect", "center": [300, 230], "size": [70, 45], "rotation_deg": -25, "label": "m"},
+    {"type": "arrow", "from": [300, 230], "to": [300, 320], "label": "mg"},
+    {"type": "arrow", "from": [300, 230], "to": [250, 170], "label": "N"},
+    {"type": "arc", "center": [500, 340], "radius": 45, "start_deg": 180, "end_deg": 155, "label": "30^\\circ"}
+  ]
+}
+```
+
+Supported scene object types are `line`, `arrow`, `rect`, `circle`, `arc`, `text`, `polyline`, and `path`.
 
 Chemistry example:
 
