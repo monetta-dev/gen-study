@@ -53,12 +53,13 @@ class FakeHandlerForSendJson:
 
 
 class ApiTests(unittest.TestCase):
-    def start_server(self, service):
+    def start_server(self, service, **kwargs):
         server = create_server(
             host="127.0.0.1",
             port=0,
             service=service,
             debug_tracebacks=False,
+            **kwargs,
         )
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -66,12 +67,15 @@ class ApiTests(unittest.TestCase):
         self.addCleanup(server.server_close)
         return server
 
-    def post_json(self, server, payload):
+    def post_json(self, server, payload, headers=None):
         body = json.dumps(payload).encode("utf-8")
+        request_headers = {"Content-Type": "application/json"}
+        if headers:
+            request_headers.update(headers)
         request = urllib.request.Request(
             f"http://127.0.0.1:{server.server_port}/generate",
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers=request_headers,
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=5) as response:
@@ -142,7 +146,65 @@ class ApiTests(unittest.TestCase):
         error.close()
         self.assertEqual(payload["status"], "error")
         self.assertEqual(payload["error"], "internal_server_error")
-        self.assertEqual(payload["detail"], "provider disconnected")
+        self.assertEqual(payload["detail"], "Unexpected server error")
+
+    def test_generate_endpoint_requires_api_key_when_configured(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient(['{"problem":"問","solution":"解"}'])),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(
+                FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
+            ),
+            ComplianceValidatorAgent(
+                FakeClient(['{"passed":true,"curriculum_compliant":true,"issues":[]}'])
+            ),
+        )
+        server = self.start_server(service, api_key="secret")
+
+        with self.assertRaises(urllib.error.HTTPError) as context:
+            self.post_json(
+                server,
+                {"level": "University of Tokyo", "topic": "Probability Recurrence Relations"},
+            )
+
+        error = context.exception
+        self.assertEqual(error.code, 401)
+        payload = json.loads(error.read().decode("utf-8"))
+        error.close()
+        self.assertEqual(payload["error"], "unauthorized")
+
+        status, payload = self.post_json(
+            server,
+            {"level": "University of Tokyo", "topic": "Probability Recurrence Relations"},
+            headers={"X-API-Key": "secret"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "success")
+
+    def test_generate_endpoint_rejects_oversized_request_body(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([])),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        server = self.start_server(service, max_body_bytes=10)
+
+        with self.assertRaises(urllib.error.HTTPError) as context:
+            self.post_json(
+                server,
+                {"level": "University of Tokyo", "topic": "Probability Recurrence Relations"},
+            )
+
+        error = context.exception
+        self.assertEqual(error.code, 400)
+        payload = json.loads(error.read().decode("utf-8"))
+        error.close()
+        self.assertEqual(payload["error"], "invalid_request")
+        self.assertIn("at most 10 bytes", payload["detail"])
 
     def test_send_json_ignores_disconnected_clients(self):
         handler = FakeHandlerForSendJson()

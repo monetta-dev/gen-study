@@ -35,7 +35,6 @@ class AgentTests(unittest.TestCase):
         critical_validator_client = FakeClient(
             [
                 '{"passed":true,"solution_accurate":true,"issues":[]}',
-                '{"passed":true,"solution_accurate":true,"issues":[]}',
             ]
         )
         compliance_validator_client = FakeClient(
@@ -58,11 +57,14 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertIn("problem", result)
         self.assertIn("solution", result)
+        self.assertNotIn("diagram", result)
+        self.assertNotIn("visual_assets", result)
         generator_system_prompt = generator_client.messages[0][0]["content"]
         compliance_system_prompt = compliance_validator_client.messages[0][0]["content"]
         self.assertIn("Write both the problem and solution in Japanese", generator_system_prompt)
+        self.assertIn('{"problem":"...","solution":"..."}', generator_system_prompt)
         self.assertIn("Japanese Output", compliance_system_prompt)
-        self.assertIn("mathematics", generator_system_prompt)
+        self.assertIn("Text-only Policy", compliance_system_prompt)
         self.assertIn("Subject: mathematics", generator_client.messages[0][1]["content"])
 
     def test_service_repairs_after_validator_failure(self):
@@ -108,8 +110,6 @@ class AgentTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["problem"], "fixed")
-        self.assertEqual(len(generator_client.messages), 1)
-        self.assertEqual(len(repair_client.messages), 1)
         repair_system_prompt = repair_client.messages[0][0]["content"]
         repair_payload = repair_client.messages[0][1]["content"]
         self.assertIn("RepairAgent", repair_system_prompt)
@@ -119,6 +119,7 @@ class AgentTests(unittest.TestCase):
         self.assertIn('"adjudicator_decision": "repair_required"', repair_payload)
         self.assertIn('"repair_focus": "fix the calculation"', repair_payload)
         self.assertIn("calculation error", repair_payload)
+        self.assertNotIn("diagram_spec", repair_payload)
 
     def test_service_returns_failure_after_repair_limit(self):
         generator_client = FakeClient(
@@ -149,13 +150,12 @@ class AgentTests(unittest.TestCase):
                 '{"passed":false,"solution_accurate":false,"issues":["still wrong"]}',
             ]
         )
-        compliance_validator_client = FakeClient([])
         service = MathGenerationService(
             GeneratorAgent(generator_client),
             AdjudicatorAgent(adjudicator_client),
             RepairAgent(repair_client),
             CriticalValidatorAgent(critical_validator_client),
-            ComplianceValidatorAgent(compliance_validator_client),
+            ComplianceValidatorAgent(FakeClient([])),
             max_repair_attempts=1,
         )
 
@@ -182,7 +182,6 @@ class AgentTests(unittest.TestCase):
                 ),
             ]
         )
-        repair_client = FakeClient([])
         critical_validator_client = FakeClient(
             [
                 '{"passed":false,"solution_accurate":false,"issues":["not actually wrong"]}',
@@ -193,6 +192,7 @@ class AgentTests(unittest.TestCase):
                 '{"passed":true,"curriculum_compliant":true,"issues":[]}',
             ]
         )
+        repair_client = FakeClient([])
         service = MathGenerationService(
             GeneratorAgent(generator_client),
             AdjudicatorAgent(adjudicator_client),
@@ -264,31 +264,18 @@ class AgentTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "topic"):
             GenerateRequest.from_dict({"level": "University of Tokyo"})
 
-    def test_empty_diagram_spec_is_treated_as_no_diagram(self):
-        generator_client = FakeClient(
-            [
-                '{"problem":"問","solution":"解","diagram_spec":{}}',
-            ]
-        )
-        critical_validator_client = FakeClient(
-            [
-                '{"passed":true,"solution_accurate":true,"issues":[]}',
-            ]
-        )
-        compliance_validator_client = FakeClient(
-            [
-                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
-            ]
-        )
-        service = MathGenerationService(
-            GeneratorAgent(generator_client),
-            AdjudicatorAgent(FakeClient([])),
-            RepairAgent(FakeClient([])),
-            CriticalValidatorAgent(critical_validator_client),
-            ComplianceValidatorAgent(compliance_validator_client),
-        )
+    def test_request_rejects_visual_generation_flags(self):
+        with self.assertRaisesRegex(ValueError, "allow_visuals"):
+            GenerateRequest.from_dict(
+                {
+                    "subject": "physics",
+                    "level": "Standard",
+                    "topic": "Mechanics",
+                    "allow_visuals": True,
+                }
+            )
 
-        result = service.generate_verified(
+        with self.assertRaisesRegex(ValueError, "allow_diagram"):
             GenerateRequest.from_dict(
                 {
                     "subject": "physics",
@@ -297,123 +284,6 @@ class AgentTests(unittest.TestCase):
                     "allow_diagram": True,
                 }
             )
-        )
-
-        self.assertEqual(result["status"], "success")
-        self.assertNotIn("diagram", result)
-
-    def test_malformed_scene_diagram_is_repaired_with_coordinate_feedback(self):
-        generator_client = FakeClient(
-            [
-                (
-                    '{"problem":"図を用いる問題","solution":"解",'
-                    '"diagram_spec":{"kind":"scene","objects":['
-                    '{"type":"circle","center":{"x":100,"y":100},"radius":20}]}}'
-                ),
-            ]
-        )
-        repair_client = FakeClient(
-            [
-                (
-                    '{"problem":"図を用いる問題","solution":"解",'
-                    '"diagram_spec":{"kind":"scene","objects":['
-                    '{"type":"circle","center":[100,100],"radius":20}]}}'
-                ),
-            ]
-        )
-        critical_validator_client = FakeClient(
-            [
-                '{"passed":true,"solution_accurate":true,"issues":[]}',
-            ]
-        )
-        compliance_validator_client = FakeClient(
-            [
-                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
-            ]
-        )
-        service = MathGenerationService(
-            GeneratorAgent(generator_client),
-            AdjudicatorAgent(FakeClient([])),
-            RepairAgent(repair_client),
-            CriticalValidatorAgent(critical_validator_client),
-            ComplianceValidatorAgent(compliance_validator_client),
-            max_repair_attempts=1,
-        )
-
-        result = service.generate_verified(
-            GenerateRequest.from_dict(
-                {
-                    "subject": "physics",
-                    "level": "Standard",
-                    "topic": "Mechanics",
-                    "allow_diagram": True,
-                }
-            )
-        )
-
-        self.assertEqual(result["status"], "success")
-        self.assertIn("diagram", result)
-        repair_payload = repair_client.messages[0][1]["content"]
-        self.assertIn("diagram_rendering", repair_payload)
-        self.assertIn("center", repair_payload)
-        self.assertIn("two-number arrays like [300, 230]", repair_payload)
-
-    def test_non_empty_diagram_without_kind_is_repaired(self):
-        generator_client = FakeClient(
-            [
-                (
-                    '{"problem":"図を用いる問題","solution":"解",'
-                    '"diagram_spec":{"objects":['
-                    '{"type":"circle","center":[100,100],"radius":20}]}}'
-                ),
-            ]
-        )
-        repair_client = FakeClient(
-            [
-                (
-                    '{"problem":"図を用いる問題","solution":"解",'
-                    '"diagram_spec":{"kind":"scene","objects":['
-                    '{"type":"circle","center":[100,100],"radius":20}]}}'
-                ),
-            ]
-        )
-        critical_validator_client = FakeClient(
-            [
-                '{"passed":true,"solution_accurate":true,"issues":[]}',
-            ]
-        )
-        compliance_validator_client = FakeClient(
-            [
-                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
-            ]
-        )
-        service = MathGenerationService(
-            GeneratorAgent(generator_client),
-            AdjudicatorAgent(FakeClient([])),
-            RepairAgent(repair_client),
-            CriticalValidatorAgent(critical_validator_client),
-            ComplianceValidatorAgent(compliance_validator_client),
-            max_repair_attempts=1,
-        )
-
-        result = service.generate_verified(
-            GenerateRequest.from_dict(
-                {
-                    "subject": "physics",
-                    "level": "Standard",
-                    "topic": "Mechanics",
-                    "allow_diagram": True,
-                }
-            )
-        )
-
-        self.assertEqual(result["status"], "success")
-        self.assertIn("diagram", result)
-        self.assertEqual(result["diagram"]["spec"]["kind"], "scene")
-        repair_payload = repair_client.messages[0][1]["content"]
-        self.assertIn("diagram_rendering", repair_payload)
-        self.assertIn("diagram_spec.kind", repair_payload)
-        self.assertIn("include a valid diagram_spec.kind such as scene", repair_payload)
 
     def test_physics_generation_uses_physics_text_only_prompts(self):
         generator_client = FakeClient(
@@ -455,71 +325,17 @@ class AgentTests(unittest.TestCase):
         compliance_system_prompt = compliance_validator_client.messages[0][0]["content"]
         compliance_payload = compliance_validator_client.messages[0][1]["content"]
         self.assertIn("physics", generator_system_prompt)
-        self.assertIn("Do not output raw diagrams", generator_system_prompt)
-        self.assertIn("allow_diagram is false", generator_system_prompt)
-        self.assertIn('Prefer diagram_spec kind "scene"', generator_system_prompt)
-        self.assertIn("line, arrow, rect, circle, arc, text, polyline, and path", generator_system_prompt)
+        self.assertIn("Use only text", generator_system_prompt)
+        self.assertIn("Describe setups", generator_system_prompt)
         self.assertIn("Japanese high school physics curriculum guidelines", generator_system_prompt)
         self.assertIn("genuine errors or inconsistencies", critical_system_prompt)
         self.assertIn("Level Alignment", compliance_system_prompt)
-        self.assertIn("requested level", compliance_system_prompt)
-        self.assertIn("too easy, too hard", compliance_system_prompt)
-        self.assertIn("Diagram Policy", compliance_system_prompt)
+        self.assertIn("Text-only Policy", compliance_system_prompt)
         self.assertIn("extract the required knowledge", compliance_system_prompt)
-        self.assertIn("Judge whether each item is taught", compliance_system_prompt)
-        self.assertIn("High difficulty means harder combinations", compliance_system_prompt)
         self.assertIn("not university-level subject knowledge or mathematics", compliance_system_prompt)
         self.assertIn('"subject": "physics"', compliance_payload)
-        self.assertIn('"allow_diagram": false', compliance_payload)
-
-    def test_physics_generation_with_diagram_renders_svg_response(self):
-        generator_client = FakeClient(
-            [
-                (
-                    '{"problem":"傾角 $30^\\\\circ$ の斜面上の物体を考える。",'
-                    '"solution":"力を斜面方向に分解する。",'
-                    '"diagram_spec":{"kind":"inclined_plane","description":"斜面上の物体",'
-                    '"angle_deg":30,"block_label":"m","forces":["mg","N"]}}'
-                ),
-            ]
-        )
-        critical_validator_client = FakeClient(
-            [
-                '{"passed":true,"solution_accurate":true,"issues":[]}',
-            ]
-        )
-        compliance_validator_client = FakeClient(
-            [
-                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
-            ]
-        )
-        service = MathGenerationService(
-            GeneratorAgent(generator_client),
-            AdjudicatorAgent(FakeClient([])),
-            RepairAgent(FakeClient([])),
-            CriticalValidatorAgent(critical_validator_client),
-            ComplianceValidatorAgent(compliance_validator_client),
-        )
-
-        result = service.generate_verified(
-            GenerateRequest.from_dict(
-                {
-                    "subject": "physics",
-                    "level": "University of Tokyo",
-                    "topic": "Mechanics",
-                    "allow_diagram": True,
-                }
-            )
-        )
-
-        self.assertEqual(result["status"], "success")
-        self.assertIn("diagram", result)
-        self.assertEqual(result["diagram"]["type"], "svg")
-        self.assertEqual(result["diagram"]["spec"]["kind"], "inclined_plane")
-        self.assertIn("<svg", result["diagram"]["svg"])
-        self.assertIn("allow_diagram: true", generator_client.messages[0][1]["content"])
-        self.assertIn('"diagram_spec"', critical_validator_client.messages[0][1]["content"])
-        self.assertIn('"diagram_spec"', compliance_validator_client.messages[0][1]["content"])
+        self.assertNotIn("allow_visuals", compliance_payload)
+        self.assertNotIn("diagram_spec", compliance_payload)
 
     def test_chemistry_generation_uses_chemistry_curriculum_prompts(self):
         generator_client = FakeClient(
@@ -563,12 +379,11 @@ class AgentTests(unittest.TestCase):
         self.assertIn("chemistry", generator_system_prompt)
         self.assertIn("Japanese high school chemistry curriculum guidelines", generator_system_prompt)
         self.assertIn("Use only text", generator_system_prompt)
-        self.assertIn("do not generate diagrams, structural drawings", generator_system_prompt)
         self.assertIn("reaction equations", generator_system_prompt)
         self.assertIn("genuine errors or inconsistencies", critical_system_prompt)
         self.assertIn("chemistry flaws", critical_system_prompt)
         self.assertIn("Level Alignment", compliance_system_prompt)
-        self.assertIn("Diagram Policy", compliance_system_prompt)
+        self.assertIn("Text-only Policy", compliance_system_prompt)
         self.assertIn("extract the required knowledge", compliance_system_prompt)
         self.assertIn("not university-level subject knowledge or mathematics", compliance_system_prompt)
         self.assertIn('"subject": "chemistry"', compliance_payload)
@@ -648,14 +463,3 @@ class AgentTests(unittest.TestCase):
         self.assertIn("--- ComplianceValidator decision ---", trace)
         self.assertIn("passed=True", trace)
         self.assertIn("=== Final result: status=success ===", trace)
-
-    def test_request_rejects_diagrams_for_non_physics_subjects(self):
-        with self.assertRaisesRegex(ValueError, "allow_diagram"):
-            GenerateRequest.from_dict(
-                {
-                    "subject": "chemistry",
-                    "level": "Standard",
-                    "topic": "Acid-Base Titration",
-                    "allow_diagram": True,
-                }
-            )

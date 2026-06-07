@@ -8,9 +8,8 @@ Supported subjects:
 - `physics`
 - `chemistry`
 
-Physics generation is text-only by default. When `allow_diagram` is enabled, the generator may return a structured `diagram_spec`; the server renders that spec to SVG.
-
-Chemistry generation is also text-only. The generator is instructed not to create diagrams, structural drawings, image references, or questions that require a visual diagram to solve.
+This API is text-only. It generates and validates Japanese problem/solution text; image and visual generation are handled by a separate API.
+Requests containing `allow_visuals` or `allow_diagram` are rejected by this API.
 
 ## Requirements
 
@@ -20,6 +19,11 @@ Chemistry generation is also text-only. The generator is instructed not to creat
 - Optional: `DEEPSEEK_MODEL`, defaults to `deepseek-v4-pro`
 - Optional: `DEEPSEEK_TIMEOUT_SECONDS`, defaults to `300`
 - Optional: `GENERATION_TRACE`, defaults to `false`
+- Optional: `API_HOST`, defaults to `127.0.0.1`
+- Optional: `API_PORT`, defaults to `8000`
+- Optional: `API_DEBUG`, defaults to `false`
+- Optional: `API_MAX_BODY_BYTES`, defaults to `65536`
+- Optional: `GEN_STUDY_API_KEY`; when set, `POST /generate` requires this key
 
 The implementation uses only the Python standard library.
 
@@ -37,6 +41,10 @@ Then edit `.env` and set your actual API key:
 DEEPSEEK_API_KEY=your_api_key_here
 DEEPSEEK_TIMEOUT_SECONDS=300
 GENERATION_TRACE=false
+API_HOST=127.0.0.1
+API_PORT=8000
+API_DEBUG=false
+GEN_STUDY_API_KEY=
 ```
 
 Start the server:
@@ -45,7 +53,7 @@ Start the server:
 python3 -m mathgen.api
 ```
 
-The server listens on `http://127.0.0.1:8000`.
+The server listens on `http://127.0.0.1:8000` by default.
 
 To see each Generator and Validator exchange in the server terminal, set:
 
@@ -55,12 +63,43 @@ GENERATION_TRACE=true
 
 The trace shows the prompts sent to each agent, the JSON content returned by each agent, validator decisions, adjudicator decisions, and repair exchanges. It does not expose private model thinking tokens; DeepSeek uses thinking internally and returns the final message content.
 
+## Production
+
+For a VPS behind a reverse proxy, keep the API bound to localhost:
+
+```dotenv
+API_HOST=127.0.0.1
+API_PORT=8000
+API_DEBUG=false
+GEN_STUDY_API_KEY=replace_with_a_long_random_secret
+```
+
+For a PaaS/container platform, bind to all interfaces and use the platform-provided port:
+
+```bash
+API_HOST=0.0.0.0 API_PORT="${PORT:-8000}" python3 -m mathgen.api
+```
+
+If `GEN_STUDY_API_KEY` is set, include either header:
+
+```bash
+X-API-Key: replace_with_a_long_random_secret
+```
+
+or:
+
+```bash
+Authorization: Bearer replace_with_a_long_random_secret
+```
+
+`GET /health` does not require authentication so load balancers can check the service.
+
 ## Validation Flow
 
 Each generation attempt is checked by two focused validators:
 
-1. `CriticalValidator` checks genuine correctness issues: calculation errors, invalid equations, unit errors, logical gaps, contradictions, missing conditions, and problem/solution/diagram inconsistencies.
-2. `ComplianceValidator` checks system acceptance: Japanese curriculum scope, Japanese output, subject/topic alignment, requested level alignment, and diagram policy.
+1. `CriticalValidator` checks genuine correctness issues: calculation errors, invalid equations, unit errors, logical gaps, contradictions, missing conditions, and problem/solution inconsistencies.
+2. `ComplianceValidator` checks system acceptance: Japanese curriculum scope, Japanese output, subject/topic alignment, requested level alignment, and text-only policy.
 
 When either validator rejects a candidate, `Adjudicator` first determines whether the finding is valid:
 
@@ -68,13 +107,22 @@ When either validator rejects a candidate, `Adjudicator` first determines whethe
 - `validator_false_positive`: ignore the validator finding and continue or accept.
 - `clarify_definition_required`: send the candidate to `RepairAgent` with a clarification focus.
 
-The repair agent revises the same candidate and validation runs again. By default the API performs one initial generation and up to three repairs. The external success and failure response shapes remain unchanged.
+The repair agent revises the same candidate and validation runs again. By default the API performs one initial generation and up to three repairs.
 
 ## Request
 
 ```bash
 curl -X POST http://127.0.0.1:8000/generate \
   -H 'Content-Type: application/json' \
+  -d '{"subject":"mathematics","level":"University of Tokyo","topic":"Probability Recurrence Relations"}'
+```
+
+With API key authentication enabled:
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: replace_with_a_long_random_secret' \
   -d '{"subject":"mathematics","level":"University of Tokyo","topic":"Probability Recurrence Relations"}'
 ```
 
@@ -85,42 +133,6 @@ curl -X POST http://127.0.0.1:8000/generate \
   -H 'Content-Type: application/json' \
   -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics"}'
 ```
-
-Physics diagram example:
-
-```bash
-curl -X POST http://127.0.0.1:8000/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics","allow_diagram":true}'
-```
-
-`allow_diagram` defaults to `false` and is currently supported only for physics. When enabled, the Generator may return a structured `diagram_spec`; the server renders it deterministically to SVG. The LLM is not allowed to output raw SVG directly.
-
-Supported `diagram_spec.kind` values:
-
-- `scene`
-- `inclined_plane`
-- `force_diagram`
-- `circuit`
-
-For new diagrams, prefer `scene`. It is a general compositional format with a canvas and safe drawing primitives:
-
-```json
-{
-  "kind": "scene",
-  "description": "斜面上の物体にはたらく力",
-  "canvas": {"width": 640, "height": 420},
-  "objects": [
-    {"type": "line", "from": [80, 340], "to": [540, 160], "label": "斜面"},
-    {"type": "rect", "center": [300, 230], "size": [70, 45], "rotation_deg": -25, "label": "m"},
-    {"type": "arrow", "from": [300, 230], "to": [300, 320], "label": "mg"},
-    {"type": "arrow", "from": [300, 230], "to": [250, 170], "label": "N"},
-    {"type": "arc", "center": [500, 340], "radius": 45, "start_deg": 180, "end_deg": 155, "label": "30^\\circ"}
-  ]
-}
-```
-
-Supported scene object types are `line`, `arrow`, `rect`, `circle`, `arc`, `text`, `polyline`, and `path`.
 
 Chemistry example:
 
@@ -136,17 +148,9 @@ curl -X POST http://127.0.0.1:8000/generate \
 {
   "status": "success",
   "problem": "Japanese question text including $LaTeX$",
-  "solution": "Japanese solution and explanation including $LaTeX$",
-  "diagram": {
-    "type": "svg",
-    "description": "Optional diagram description",
-    "spec": {"kind": "inclined_plane"},
-    "svg": "<svg ...>...</svg>"
-  }
+  "solution": "Japanese solution and explanation including $LaTeX$"
 }
 ```
-
-The `diagram` field is omitted when no diagram is generated.
 
 If validation and repair attempts still fail, the API returns HTTP 422 with `status: "failed"` and the latest validator issues.
 
@@ -154,7 +158,7 @@ For backward compatibility, requests without `subject` are treated as `mathemati
 
 ## Viewer
 
-A static viewer is available at `viewer/index.html`. It renders generated JSON responses with LaTeX formatting and optional SVG diagrams.
+A static viewer is available at `viewer/index.html`. It renders generated JSON responses with LaTeX formatting.
 
 Open it directly in a browser:
 
@@ -175,11 +179,11 @@ Save an API response and load it in the viewer:
 ```bash
 curl --max-time 600 -X POST http://127.0.0.1:8000/generate \
   -H 'Content-Type: application/json' \
-  -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics","allow_diagram":true}' \
+  -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics"}' \
   -o generated-response.json
 ```
 
-The viewer uses MathJax from a CDN, so LaTeX rendering needs browser access to that script. The raw text and SVG still display if MathJax is unavailable.
+The viewer uses MathJax from a CDN, so LaTeX rendering needs browser access to that script. The raw text still displays if MathJax is unavailable.
 
 ## Test
 

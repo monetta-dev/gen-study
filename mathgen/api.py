@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hmac
 import json
+import os
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -45,14 +47,31 @@ def build_service() -> MathGenerationService:
 
 
 def _env_flag(name: str) -> bool:
-    import os
-
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ContractError(f"`{name}` must be an integer") from exc
+    if parsed < 0:
+        raise ContractError(f"`{name}` must be non-negative")
+    return parsed
+
+
+def _env_string(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
 
 
 class MathGenerationHandler(BaseHTTPRequestHandler):
     service: MathGenerationService | None = None
-    debug_tracebacks = True
+    debug_tracebacks = False
+    api_key = ""
+    max_body_bytes = 65536
 
     def do_GET(self) -> None:
         if self.path == "/health":
@@ -63,6 +82,12 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.path != "/generate":
             self._send_json(HTTPStatus.NOT_FOUND, {"status": "error", "error": "not_found"})
+            return
+        if not self._is_authorized():
+            self._send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"status": "error", "error": "unauthorized"},
+            )
             return
 
         try:
@@ -91,12 +116,13 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             if self.debug_tracebacks:
                 traceback.print_exc()
+            detail = str(exc) if self.debug_tracebacks else "Unexpected server error"
             self._send_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
                 {
                     "status": "error",
                     "error": "internal_server_error",
-                    "detail": str(exc),
+                    "detail": detail,
                 },
             )
             return
@@ -109,11 +135,28 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
 
     def _read_json_body(self) -> dict[str, Any]:
         content_length = int(self.headers.get("Content-Length", "0"))
+        if content_length > self.max_body_bytes:
+            raise ContractError(
+                f"Request body must be at most {self.max_body_bytes} bytes"
+            )
         raw_body = self.rfile.read(content_length).decode("utf-8")
         payload = json.loads(raw_body)
         if not isinstance(payload, dict):
             raise ContractError("Request body must be a JSON object")
         return payload
+
+    def _is_authorized(self) -> bool:
+        if not self.api_key:
+            return True
+        provided_key = self.headers.get("X-API-Key", "").strip()
+        if hmac.compare_digest(provided_key, self.api_key):
+            return True
+        auth_header = self.headers.get("Authorization", "").strip()
+        prefix = "Bearer "
+        return auth_header.startswith(prefix) and hmac.compare_digest(
+            auth_header[len(prefix) :],
+            self.api_key,
+        )
 
     def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -132,20 +175,38 @@ def create_server(
     host: str = "127.0.0.1",
     port: int = 8000,
     service: MathGenerationService | None = None,
-    debug_tracebacks: bool = True,
+    debug_tracebacks: bool = False,
+    api_key: str = "",
+    max_body_bytes: int = 65536,
 ) -> ThreadingHTTPServer:
     class Handler(MathGenerationHandler):
         pass
 
     Handler.service = service
     Handler.debug_tracebacks = debug_tracebacks
+    Handler.api_key = api_key
+    Handler.max_body_bytes = max_body_bytes
     return ThreadingHTTPServer((host, port), Handler)
 
 
 def main() -> None:
     load_dotenv()
-    server = create_server()
-    print("Serving exam question generation API on http://127.0.0.1:8000")
+    default_host = "0.0.0.0" if _env_string("PORT") else "127.0.0.1"
+    host = _env_string("API_HOST", default_host)
+    port = _env_int("API_PORT", _env_int("PORT", 8000))
+    debug_tracebacks = _env_flag("API_DEBUG")
+    api_key = _env_string("GEN_STUDY_API_KEY")
+    max_body_bytes = _env_int("API_MAX_BODY_BYTES", 65536)
+    server = create_server(
+        host=host,
+        port=port,
+        debug_tracebacks=debug_tracebacks,
+        api_key=api_key,
+        max_body_bytes=max_body_bytes,
+    )
+    print(f"Serving exam question generation API on http://{host}:{port}")
+    if api_key:
+        print("API key authentication is enabled for POST /generate")
     print(
         "POST /generate with JSON: "
         "{\"subject\":\"chemistry\",\"level\":\"University of Tokyo\",\"topic\":\"Acid-Base Titration\"}"

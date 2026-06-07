@@ -6,12 +6,10 @@ import json
 import sys
 from typing import Protocol
 
-from .diagrams import render_diagram
 from .json_utils import parse_json_object
 from .models import (
     AdjudicationResult,
     ComplianceValidationResult,
-    ContractError,
     CriticalValidationResult,
     GenerateRequest,
     GeneratedProblem,
@@ -109,11 +107,13 @@ SUBJECT_INSTRUCTIONS = {
         "curriculum_scope": "Japanese high school mathematics curriculum",
         "accuracy_scope": "formulas, calculations, logical steps, and existence of a valid solution",
         "constraints": (
-            "Mathematical expressions must be written in LaTeX using $...$ or $$...$$."
+            "Mathematical expressions must be written in LaTeX using $...$ or $$...$$. "
+            "Use only text; do not generate diagrams, graphs, figures, image references, "
+            "SVG, or questions that require visual assets to solve."
         ),
         "rejection_scope": (
             "mathematical flaws, insufficient conditions, redundant contradictory "
-            "conditions, or out-of-scope methods"
+            "conditions, diagram-dependent wording, or out-of-scope methods"
         ),
     },
     "physics": {
@@ -125,10 +125,9 @@ SUBJECT_INSTRUCTIONS = {
             "and existence of a valid solution"
         ),
         "constraints": (
-            "Do not output raw diagrams, figures, image references, or SVG. If "
-            "allow_diagram is false, the problem must be fully text-only and must "
-            "not require a diagram to solve. If allow_diagram is true, you may "
-            "include a structured diagram_spec object when it improves clarity. "
+            "Use only text; do not generate diagrams, graphs, figures, image references, "
+            "SVG, or questions that require visual assets to solve. Describe setups, "
+            "directions, forces, fields, circuits, and graphs completely in words. "
             "Mathematical and physical expressions must be written in LaTeX using "
             "$...$ or $$...$$."
         ),
@@ -148,7 +147,7 @@ SUBJECT_INSTRUCTIONS = {
         ),
         "constraints": (
             "Use only text; do not generate diagrams, structural drawings, image "
-            "references, or questions that require a visual diagram to solve. "
+            "references, SVG, or questions that require visual assets to solve. "
             "Describe any experimental setup, molecular structure, or reaction "
             "conditions completely in words. Chemical formulas, reaction equations, "
             "and mathematical expressions must be written in text or LaTeX using "
@@ -177,16 +176,15 @@ Write both the problem and solution in Japanese.
 The problem must be solvable within the {instruction["curriculum_scope"]}.
 {instruction["constraints"]}
 Return exactly this JSON shape:
-{{"problem":"...","solution":"...","diagram_spec":null}}
-If the user sets allow_diagram to true for physics and a diagram would make the problem clearer, include a structured diagram_spec object instead of null. Do not output raw SVG. Prefer diagram_spec kind "scene" for new diagrams. A scene uses {{"kind":"scene","canvas":{{"width":640,"height":420}},"objects":[...]}} with safe primitives: line, arrow, rect, circle, arc, text, polyline, and path. Legacy supported diagram_spec kinds are "inclined_plane", "force_diagram", and "circuit". If no diagram is needed, use null."""
+{{"problem":"...","solution":"..."}}"""
 
 
 def critical_validator_system_prompt(subject: str) -> str:
     instruction = _subject_instruction(subject)
     return f"""You are CriticalValidator, an independent {instruction["subject_name"]} correctness reviewer.
-Your only job is to find genuine errors or inconsistencies in the problem, solution, and diagram_spec.
+Your only job is to find genuine errors or inconsistencies in the problem and solution.
 Focus on: {instruction["accuracy_scope"]}.
-Reject if there is any calculation error, invalid equation, incorrect unit, logical gap, self-contradiction, missing condition, inconsistent condition, mismatch between the problem and solution, or diagram/text inconsistency.
+Reject if there is any calculation error, invalid equation, incorrect unit, logical gap, self-contradiction, missing condition, inconsistent condition, or mismatch between the problem and solution.
 Ignore elegance, difficulty calibration, Japanese wording quality, and curriculum scope unless they directly create a correctness problem.
 Reject problems with {instruction["rejection_scope"]}.
 Use DeepSeek thinking internally, but output only strict JSON.
@@ -197,13 +195,13 @@ Return exactly this JSON shape:
 def compliance_validator_system_prompt(subject: str) -> str:
     instruction = _subject_instruction(subject)
     return f"""You are ComplianceValidator, an independent {instruction["subject_name"]} policy reviewer.
-Assume the problem and solution may be scientifically or mathematically correct. Your job is to decide whether they are acceptable for this system.
+Assume the problem and solution may be scientifically or mathematically correct. Your job is to decide whether they are acceptable for this text-only system.
 Evaluate this mandatory checklist:
 1. Curriculum Compliance: solvable without knowledge beyond the {instruction["curriculum_scope"]}.
 2. Japanese Output: the final problem and solution text are written in Japanese, with only mathematical notation, symbols, variable names, units, and standard terms left as needed.
 3. Subject and Topic Alignment: the problem matches the requested subject and topic.
 4. Level Alignment: the problem difficulty, complexity, and expected reasoning depth match the requested level. Reject if it is clearly too easy, too hard, or calibrated to a different exam level.
-5. Diagram Policy: for physics and chemistry, reject any problem that requires a diagram, figure, structural drawing, image, or visual reference unless a sufficient diagram_spec is provided and diagrams are allowed.
+5. Text-only Policy: reject any problem that requires a diagram, graph, figure, structural drawing, image, or visual reference to solve.
 Before deciding, extract the required knowledge, concepts, laws, formulas, and mathematical methods used in the problem and solution. Judge whether each item is taught within the subject curriculum and prerequisite Japanese high school mathematics. Reject if solving requires any item outside that scope, even when the final answer is correct.
 High difficulty means harder combinations of high-school methods, not university-level subject knowledge or mathematics.
 Use DeepSeek thinking internally, but output only strict JSON.
@@ -214,15 +212,14 @@ Return exactly this JSON shape:
 def repair_system_prompt(subject: str) -> str:
     instruction = _subject_instruction(subject)
     return f"""You are RepairAgent, an independent {instruction["subject_name"]} revision specialist.
-Revise the existing problem, solution, and optional diagram_spec using the validator feedback and adjudicator guidance.
+Revise the existing problem and solution using the validator feedback and adjudicator guidance.
 Preserve the requested subject, topic, difficulty level, Japanese output, and overall intent.
 Change only what is necessary to resolve the reported issues.
 Do not introduce university-level subject knowledge or mathematics.
 The repaired problem must remain solvable within the {instruction["curriculum_scope"]}.
 {instruction["constraints"]}
-If diagram_spec is present, update it only when needed to restore consistency. Do not output raw SVG.
 Return exactly this JSON shape:
-{{"problem":"...","solution":"...","diagram_spec":null}}"""
+{{"problem":"...","solution":"..."}}"""
 
 
 def adjudicator_system_prompt(subject: str) -> str:
@@ -253,11 +250,10 @@ class GeneratorAgent:
             {
                 "role": "user",
                 "content": (
-                        f"Generate one entrance exam {request.subject} question with solution.\n"
-                        f"Subject: {request.subject}\n"
-                        f"Difficulty level: {request.level}\n"
-                        f"Topic: {request.topic}\n"
-                        f"allow_diagram: {str(request.allow_diagram).lower()}"
+                    f"Generate one entrance exam {request.subject} question with solution.\n"
+                    f"Subject: {request.subject}\n"
+                    f"Difficulty level: {request.level}\n"
+                    f"Topic: {request.topic}"
                 ),
             },
         ]
@@ -291,7 +287,6 @@ class RepairAgent:
                         "subject": request.subject,
                         "level": request.level,
                         "topic": request.topic,
-                        "allow_diagram": request.allow_diagram,
                         "validation_stage": validation_stage,
                         "validator_issues": list(issues),
                         "adjudicator_decision": adjudication.decision,
@@ -299,7 +294,6 @@ class RepairAgent:
                         "repair_focus": adjudication.repair_focus,
                         "problem": generated.problem,
                         "solution": generated.solution,
-                        "diagram_spec": generated.diagram_spec,
                     },
                     ensure_ascii=False,
                 ),
@@ -334,12 +328,10 @@ class AdjudicatorAgent:
                         "subject": request.subject,
                         "level": request.level,
                         "topic": request.topic,
-                        "allow_diagram": request.allow_diagram,
                         "validation_stage": validation_stage,
                         "validator_issues": list(issues),
                         "problem": generated.problem,
                         "solution": generated.solution,
-                        "diagram_spec": generated.diagram_spec,
                     },
                     ensure_ascii=False,
                 ),
@@ -361,10 +353,8 @@ def _validation_payload(
             "subject": request.subject,
             "level": request.level,
             "topic": request.topic,
-            "allow_diagram": request.allow_diagram,
             "problem": generated.problem,
             "solution": generated.solution,
-            "diagram_spec": generated.diagram_spec,
         },
         ensure_ascii=False,
     )
@@ -452,58 +442,6 @@ class MathGenerationService:
         generated = self.generator.generate(request)
 
         for repair_count in range(0, self.max_repair_attempts + 1):
-            if generated.diagram_spec is not None and not request.allow_diagram:
-                last_validation = ValidationResult(
-                    passed=False,
-                    solution_accurate=True,
-                    curriculum_compliant=False,
-                    issues=("diagram_spec was returned when allow_diagram was false",),
-                )
-                generated = self._repair_or_finish(
-                    request,
-                    generated,
-                    "diagram_policy",
-                    last_validation.issues,
-                    repair_count,
-                    AdjudicationResult(
-                        decision="repair_required",
-                        reason="diagram_spec violates the request diagram policy",
-                        repair_focus="remove diagram_spec or make the problem fully text-only",
-                    ),
-                )
-                if generated is None:
-                    break
-                continue
-            try:
-                rendered_diagram = render_diagram(generated.diagram_spec)
-            except ContractError as exc:
-                last_validation = ValidationResult(
-                    passed=False,
-                    solution_accurate=True,
-                    curriculum_compliant=False,
-                    issues=(str(exc),),
-                )
-                generated = self._repair_or_finish(
-                    request,
-                    generated,
-                    "diagram_rendering",
-                    last_validation.issues,
-                    repair_count,
-                    AdjudicationResult(
-                        decision="repair_required",
-                        reason="diagram_spec could not be rendered",
-                        repair_focus=(
-                            "fix diagram_spec so it matches a supported schema; "
-                            "include a valid diagram_spec.kind such as scene; "
-                            "for scene objects, coordinate fields such as center, "
-                            "from, to, position, and each points entry must be "
-                            "two-number arrays like [300, 230]"
-                        ),
-                    ),
-                )
-                if generated is None:
-                    break
-                continue
             critical_validation = self.critical_validator.validate(request, generated)
             if not critical_validation.passed:
                 last_validation = ValidationResult(
@@ -518,7 +456,7 @@ class MathGenerationService:
                 if adjudication.decision == "validator_false_positive":
                     compliance_validation = self.compliance_validator.validate(request, generated)
                     if compliance_validation.passed:
-                        result = generated.to_success_response(rendered_diagram)
+                        result = generated.to_success_response()
                         self.tracer.log_final_result(result)
                         return result
                     last_validation = ValidationResult(
@@ -531,7 +469,7 @@ class MathGenerationService:
                         request, generated, "compliance", last_validation.issues
                     )
                     if adjudication.decision == "validator_false_positive":
-                        result = generated.to_success_response(rendered_diagram)
+                        result = generated.to_success_response()
                         self.tracer.log_final_result(result)
                         return result
                     generated = self._repair_or_finish(
@@ -559,7 +497,7 @@ class MathGenerationService:
 
             compliance_validation = self.compliance_validator.validate(request, generated)
             if compliance_validation.passed:
-                result = generated.to_success_response(rendered_diagram)
+                result = generated.to_success_response()
                 self.tracer.log_final_result(result)
                 return result
             last_validation = ValidationResult(
@@ -572,7 +510,7 @@ class MathGenerationService:
                 request, generated, "compliance", last_validation.issues
             )
             if adjudication.decision == "validator_false_positive":
-                result = generated.to_success_response(rendered_diagram)
+                result = generated.to_success_response()
                 self.tracer.log_final_result(result)
                 return result
             generated = self._repair_or_finish(
