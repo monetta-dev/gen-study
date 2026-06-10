@@ -1,6 +1,6 @@
 # Entrance Exam Question Generation & Verification API
 
-Python backend API for generating and validating Japanese university entrance exam questions with independent DeepSeek V4 Pro agents.
+Python backend API for generating and validating Japanese university entrance exam questions with independent model agents.
 
 Supported subjects:
 
@@ -14,10 +14,21 @@ Requests containing `allow_visuals` or `allow_diagram` are rejected by this API.
 ## Requirements
 
 - Python 3.11+
-- `DEEPSEEK_API_KEY` in `.env` or the shell environment
-- Optional: `DEEPSEEK_BASE_URL`, defaults to `https://api.deepseek.com`
-- Optional: `DEEPSEEK_MODEL`, defaults to `deepseek-v4-pro`
-- Optional: `DEEPSEEK_TIMEOUT_SECONDS`, defaults to `300`
+- `LLM_API_KEY` or `DEEPSEEK_API_KEY` in `.env` or the shell environment
+- Optional: `LLM_PROVIDER`, defaults to `deepseek`
+- Optional: `LLM_API_STYLE`, defaults to `openai`; use `anthropic` for Anthropic-compatible `/messages`
+- Optional: `LLM_BASE_URL`, falls back to `DEEPSEEK_BASE_URL`, then `https://api.deepseek.com`
+- Optional: `LLM_MODEL`, falls back to `DEEPSEEK_MODEL`, then `deepseek-v4-pro`
+- Optional: `LLM_TIMEOUT_SECONDS`, defaults to `300`
+- Optional: `LLM_MAX_TOKENS`, defaults to `8192` for Anthropic-compatible `/messages`
+- Optional: `LLM_STREAM`, defaults to `true` for OpenCode Go Anthropic-compatible `/messages`
+- Optional: `LLM_USER_AGENT`, defaults to `gen-study/0.1 Python LLM client`
+- Optional: `LLM_THINKING_MODE`, defaults to `auto`; use `enabled` to require a thinking parameter
+- Optional: `LLM_THINKING_BUDGET_TOKENS`, defaults to `4096` for Anthropic-compatible thinking
+- Optional: `LLM_THINKING_DISPLAY`, defaults to `omitted`
+- Optional: `LLM_THINKING_FIELD`; normally leave empty so provider/model presets choose it
+- Optional: `LLM_RETRY_ATTEMPTS`, defaults to `1` for retryable provider HTTP errors
+- Optional: `LLM_RETRY_DELAY_SECONDS`, defaults to `10`
 - Optional: `GENERATION_TRACE`, defaults to `false`
 - Optional: `API_HOST`, defaults to `127.0.0.1`
 - Optional: `API_PORT`, defaults to `8000`
@@ -39,8 +50,20 @@ cp .env.example .env
 Then edit `.env` and set your actual API key:
 
 ```dotenv
-DEEPSEEK_API_KEY=your_api_key_here
-DEEPSEEK_TIMEOUT_SECONDS=300
+LLM_PROVIDER=opencode-go
+LLM_API_STYLE=anthropic
+LLM_API_KEY=your_opencode_go_api_key_here
+LLM_BASE_URL=https://opencode.ai/zen/go/v1
+LLM_MODEL=qwen3.7-max
+LLM_TIMEOUT_SECONDS=300
+LLM_MAX_TOKENS=4096
+LLM_STREAM=true
+LLM_USER_AGENT=gen-study/0.1 Python LLM client
+LLM_THINKING_MODE=enabled
+LLM_THINKING_BUDGET_TOKENS=1024
+LLM_THINKING_DISPLAY=omitted
+LLM_RETRY_ATTEMPTS=1
+LLM_RETRY_DELAY_SECONDS=10
 GENERATION_TRACE=false
 API_HOST=127.0.0.1
 API_PORT=8000
@@ -63,7 +86,162 @@ To see each Generator and Validator exchange in the server terminal, set:
 GENERATION_TRACE=true
 ```
 
-The trace shows the prompts sent to each agent, the JSON content returned by each agent, validator decisions, adjudicator decisions, and repair exchanges. It does not expose private model thinking tokens; DeepSeek uses thinking internally and returns the final message content.
+The trace shows the prompts sent to each agent, the JSON content returned by each agent, validator decisions, adjudicator decisions, and repair exchanges. It does not expose private model thinking tokens.
+
+For local debugging, enable detailed API errors:
+
+```dotenv
+API_DEBUG=true
+```
+
+Then restart:
+
+```bash
+python3 -m mathgen.api
+```
+
+Unexpected failures return a `request_id` in the browser response and log the
+same ID in the server terminal. With `API_DEBUG=true`, the browser response also
+includes the exception message. Keep `API_DEBUG=false` in production.
+
+## Model Provider
+
+The backend supports two API styles:
+
+- `LLM_API_STYLE=openai`: OpenAI-compatible `POST /chat/completions`
+- `LLM_API_STYLE=anthropic`: Anthropic-compatible `POST /messages`
+
+DeepSeek remains the default for backward compatibility, but you can switch
+providers with `LLM_*` environment variables. OpenCode Go model IDs and endpoint
+families are based on the OpenCode Go docs.
+
+For OpenCode Go Qwen3.7 Max, configure Render or `.env` like this:
+
+```dotenv
+LLM_PROVIDER=opencode-go
+LLM_API_KEY=your_opencode_go_api_key
+LLM_MODEL=qwen3.7-max
+LLM_TIMEOUT_SECONDS=300
+LLM_MAX_TOKENS=4096
+LLM_STREAM=true
+LLM_USER_AGENT=gen-study/0.1 Python LLM client
+LLM_THINKING_MODE=enabled
+LLM_THINKING_BUDGET_TOKENS=1024
+LLM_THINKING_DISPLAY=omitted
+LLM_RETRY_ATTEMPTS=1
+LLM_RETRY_DELAY_SECONDS=10
+```
+
+This calls:
+
+```text
+POST https://opencode.ai/zen/go/v1/messages
+```
+
+The client infers `LLM_API_STYLE=anthropic` and
+`LLM_BASE_URL=https://opencode.ai/zen/go/v1` for `qwen3.7-max`. It also enables
+internal SSE streaming by default for OpenCode Go `/messages`, then collects the
+streamed text and returns the same normal JSON response from this API.
+
+Thinking is sent as:
+
+```json
+{"thinking":{"type":"enabled","budget_tokens":1024,"display":"omitted"}}
+```
+
+`LLM_THINKING_BUDGET_TOKENS` must be less than `LLM_MAX_TOKENS`.
+The `.env.example` uses a smaller `1024` thinking budget because OpenCode Go is
+behind Cloudflare, which can return HTTP 524 if the origin does not complete a
+response within about 120 seconds.
+
+OpenCode Go models currently handled as Anthropic-compatible `/messages`:
+
+- `qwen3.7-max`
+- `qwen3.7-plus`
+- `qwen3.6-plus`
+- `minimax-m3`
+- `minimax-m2.7`
+- `minimax-m2.5`
+
+OpenCode Go models currently handled as OpenAI-compatible `/chat/completions`:
+
+- `deepseek-v4-pro`
+- `deepseek-v4-flash`
+- `glm-5.1`
+- `glm-5`
+- `kimi-k2.6`
+- `kimi-k2.5`
+- `mimo-v2.5`
+- `mimo-v2.5-pro`
+
+For OpenCode Go OpenAI-compatible models, use:
+
+```dotenv
+LLM_PROVIDER=opencode-go
+LLM_API_KEY=your_opencode_go_api_key
+LLM_MODEL=deepseek-v4-pro
+LLM_THINKING_MODE=enabled
+```
+
+This calls:
+
+```text
+POST https://opencode.ai/zen/go/v1/chat/completions
+```
+
+For direct DeepSeek, `LLM_THINKING_MODE=enabled` sends:
+
+```json
+{"thinking":{"type":"enabled"}}
+```
+
+For Qwen through Alibaba DashScope OpenAI-compatible mode, configure Render or
+`.env` like this:
+
+```dotenv
+LLM_PROVIDER=qwen
+LLM_API_STYLE=openai
+LLM_API_KEY=your_dashscope_api_key
+LLM_BASE_URL=https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+LLM_MODEL=qwen-max
+LLM_THINKING_MODE=enabled
+LLM_THINKING_FIELD=enable_thinking
+```
+
+If your Alibaba Cloud account/region uses the China endpoint, use:
+
+```dotenv
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+Use the exact Qwen model identifier shown in your DashScope console. The older
+`DEEPSEEK_*` variables still work as a fallback.
+
+If OpenCode Go returns Cloudflare 1010 `browser_signature_banned`, the request
+was blocked before reaching the LLM API. The client sends `LLM_USER_AGENT` on
+all provider calls; try setting it to a stable application identifier. If the
+same 1010 response persists, OpenCode must allow server-side API clients or
+document the required client signature.
+
+If OpenCode Go returns Cloudflare 524 `origin_response_timeout`, the model call
+is taking too long for Cloudflare's edge timeout. Keep `LLM_STREAM=true` so the
+provider can send SSE chunks while it works. If 524 still occurs, keep thinking
+enabled but lower the budget first:
+
+```dotenv
+LLM_MAX_TOKENS=4096
+LLM_THINKING_BUDGET_TOKENS=1024
+```
+
+If 524 still occurs, try:
+
+```dotenv
+LLM_MAX_TOKENS=2048
+LLM_THINKING_BUDGET_TOKENS=512
+```
+
+Retryable provider errors such as 524, 429, and common 5xx responses are retried
+according to `LLM_RETRY_ATTEMPTS` and `LLM_RETRY_DELAY_SECONDS`.
 
 ## Production
 

@@ -57,11 +57,12 @@ class FakeHandlerForSendJson:
 
 class ApiTests(unittest.TestCase):
     def start_server(self, service, **kwargs):
+        debug_tracebacks = kwargs.pop("debug_tracebacks", False)
         server = create_server(
             host="127.0.0.1",
             port=0,
             service=service,
-            debug_tracebacks=False,
+            debug_tracebacks=debug_tracebacks,
             **kwargs,
         )
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -166,6 +167,31 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["status"], "error")
         self.assertEqual(payload["error"], "internal_server_error")
         self.assertEqual(payload["detail"], "Unexpected server error")
+        self.assertRegex(payload["request_id"], r"^[0-9a-f]{12}$")
+
+    def test_generate_endpoint_returns_debug_detail_when_enabled(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([RuntimeError("provider disconnected")])),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        server = self.start_server(service, debug_tracebacks=True)
+
+        with self.assertRaises(urllib.error.HTTPError) as context:
+            self.post_json(
+                server,
+                {"level": "University of Tokyo", "topic": "Probability Recurrence Relations"},
+            )
+
+        error = context.exception
+        self.assertEqual(error.code, 500)
+        payload = json.loads(error.read().decode("utf-8"))
+        error.close()
+        self.assertEqual(payload["error"], "internal_server_error")
+        self.assertEqual(payload["detail"], "provider disconnected")
+        self.assertRegex(payload["request_id"], r"^[0-9a-f]{12}$")
 
     def test_generate_endpoint_requires_api_key_when_configured(self):
         service = MathGenerationService(

@@ -6,7 +6,9 @@ import hmac
 import json
 import mimetypes
 import os
+import sys
 import traceback
+import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -104,6 +106,7 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:
+        request_id = uuid.uuid4().hex[:12]
         if self.path != "/generate":
             self._send_json(HTTPStatus.NOT_FOUND, {"status": "error", "error": "not_found"})
             return
@@ -120,26 +123,38 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
             service = self.service or build_service()
             result = service.generate_verified(request)
         except ContractError as exc:
+            self._log_error(request_id, "invalid_request", exc)
             self._send_json(
                 HTTPStatus.BAD_REQUEST,
-                {"status": "error", "error": "invalid_request", "detail": str(exc)},
+                {
+                    "status": "error",
+                    "error": "invalid_request",
+                    "detail": str(exc),
+                    "request_id": request_id,
+                },
             )
             return
         except DeepSeekError as exc:
+            self._log_error(request_id, "llm_api_error", exc)
             self._send_json(
                 HTTPStatus.BAD_GATEWAY,
-                {"status": "error", "error": "deepseek_api_error", "detail": str(exc)},
+                {
+                    "status": "error",
+                    "error": "llm_api_error",
+                    "detail": str(exc),
+                    "request_id": request_id,
+                },
             )
             return
         except json.JSONDecodeError:
+            self._log_error(request_id, "invalid_json")
             self._send_json(
                 HTTPStatus.BAD_REQUEST,
-                {"status": "error", "error": "invalid_json"},
+                {"status": "error", "error": "invalid_json", "request_id": request_id},
             )
             return
         except Exception as exc:
-            if self.debug_tracebacks:
-                traceback.print_exc()
+            self._log_error(request_id, "internal_server_error", exc)
             detail = str(exc) if self.debug_tracebacks else "Unexpected server error"
             self._send_json(
                 HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -147,6 +162,7 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
                     "status": "error",
                     "error": "internal_server_error",
                     "detail": detail,
+                    "request_id": request_id,
                 },
             )
             return
@@ -156,6 +172,19 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         return
+
+    def _log_error(
+        self,
+        request_id: str,
+        error: str,
+        exc: BaseException | None = None,
+    ) -> None:
+        message = f"[request_id={request_id}] {error}"
+        if exc is not None:
+            message = f"{message}: {exc}"
+        print(message, file=sys.stderr, flush=True)
+        if exc is not None and self.debug_tracebacks:
+            traceback.print_exception(type(exc), exc, exc.__traceback__, file=sys.stderr)
 
     def _read_json_body(self) -> dict[str, Any]:
         content_length = int(self.headers.get("Content-Length", "0"))

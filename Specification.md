@@ -4,7 +4,7 @@
 
 ## 1. System Overview
 
-A Python-based backend API that automatically generates and verifies Japanese university entrance exam mathematics questions and solutions by leveraging the DeepSeek V4 Pro API.
+A Python-based backend API that automatically generates and verifies Japanese university entrance exam questions and solutions by using an OpenAI-compatible LLM API.
 
 
 
@@ -28,7 +28,7 @@ Two independent agents (LLMs), "Generator" and "Validator", collaborate within t
 
 2. **Generator Agent**
 
-   * Generates a question, solution, and explanation using DeepSeek V4 Pro with Thinking Mode enabled.
+   * Generates a question, solution, and explanation using the configured LLM provider.
 
 3. **Validator Agent**
 
@@ -58,7 +58,7 @@ Two independent agents (LLMs), "Generator" and "Validator", collaborate within t
 
 * **Role**: Creates original entrance exam questions (written/structured formats) tailored to the specified difficulty level and topic.
 
-* **Model**: `deepseek-v4-pro` (Thinking Mode: ON)
+* **Model**: configured by environment variables such as `LLM_MODEL`
 
 
 
@@ -66,7 +66,7 @@ Two independent agents (LLMs), "Generator" and "Validator", collaborate within t
 
 * **Role**: Cross-checks and filters the generated questions and solutions.
 
-* **Model**: `deepseek-v4-pro` (Thinking Mode: ON)
+* **Model**: configured by environment variables such as `LLM_MODEL`
 
 * **Mandatory Checklist**:
 

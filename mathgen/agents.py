@@ -171,7 +171,7 @@ def generator_system_prompt(subject: str) -> str:
     instruction = _subject_instruction(subject)
     return f"""You are Generator, {instruction["generator_role"]}.
 Create one original Japanese university entrance exam {instruction["subject_name"]} question.
-Use DeepSeek thinking internally, but output only strict JSON.
+Use internal reasoning if available, but output only strict JSON.
 Write both the problem and solution in Japanese.
 The problem must be solvable within the {instruction["curriculum_scope"]}.
 {instruction["constraints"]}
@@ -187,7 +187,7 @@ Focus on: {instruction["accuracy_scope"]}.
 Reject if there is any calculation error, invalid equation, incorrect unit, logical gap, self-contradiction, missing condition, inconsistent condition, or mismatch between the problem and solution.
 Ignore elegance, difficulty calibration, Japanese wording quality, and curriculum scope unless they directly create a correctness problem.
 Reject problems with {instruction["rejection_scope"]}.
-Use DeepSeek thinking internally, but output only strict JSON.
+Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {{"passed":true|false,"solution_accurate":true|false,"issues":["..."]}}"""
 
@@ -204,7 +204,7 @@ Evaluate this mandatory checklist:
 5. Text-only Policy: reject any problem that requires a diagram, graph, figure, structural drawing, image, or visual reference to solve.
 Before deciding, extract the required knowledge, concepts, laws, formulas, and mathematical methods used in the problem and solution. Judge whether each item is taught within the subject curriculum and prerequisite Japanese high school mathematics. Reject if solving requires any item outside that scope, even when the final answer is correct.
 High difficulty means harder combinations of high-school methods, not university-level subject knowledge or mathematics.
-Use DeepSeek thinking internally, but output only strict JSON.
+Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {{"passed":true|false,"curriculum_compliant":true|false,"issues":["..."]}}"""
 
@@ -232,7 +232,7 @@ Choose exactly one decision:
 - validator_false_positive: the validator likely misunderstood, overreached, or made a high-probability false finding.
 - clarify_definition_required: the problem or solution is ambiguous because a definition, convention, condition, or assumption needs clarification.
 If clarification is required, repair_focus should describe the definition or condition to clarify.
-Use DeepSeek thinking internally, but output only strict JSON.
+Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {{"decision":"repair_required|validator_false_positive|clarify_definition_required","reason":"...","repair_focus":"..."}}"""
 
