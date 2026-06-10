@@ -18,6 +18,33 @@ const problemOutput = document.getElementById("problemOutput");
 const solutionOutput = document.getElementById("solutionOutput");
 const rawOutput = document.getElementById("rawOutput");
 
+const defaultTopicsBySubject = {
+  mathematics: "Probability Recurrence Relations",
+  physics: "Mechanics",
+  chemistry: "Acid-Base Titration"
+};
+
+const topicOptionsBySubject = {
+  mathematics: [
+    "Probability Recurrence Relations",
+    "Integer Problems",
+    "Calculus",
+    "Coordinate Geometry"
+  ],
+  physics: [
+    "Mechanics",
+    "Electromagnetism",
+    "Waves",
+    "Thermodynamics"
+  ],
+  chemistry: [
+    "Acid-Base Titration",
+    "Chemical Equilibrium",
+    "Organic Chemistry",
+    "Oxidation-Reduction"
+  ]
+};
+
 function defaultApiUrl() {
   const configuredApiUrl = window.GEN_STUDY_CONFIG && window.GEN_STUDY_CONFIG.apiUrl;
   if (configuredApiUrl) {
@@ -27,6 +54,28 @@ function defaultApiUrl() {
     return `${window.location.origin}/generate`;
   }
   return "http://127.0.0.1:8000/generate";
+}
+
+function setTopicOptions(subject) {
+  const topicOptions = document.getElementById("topicOptions");
+  clearNode(topicOptions);
+  topicOptionsBySubject[subject].forEach((topic) => {
+    const option = document.createElement("option");
+    option.value = topic;
+    topicOptions.appendChild(option);
+  });
+}
+
+function initializeRequestDefaults() {
+  const subject = subjectInput.value || "mathematics";
+  setTopicOptions(subject);
+  topicInput.value = defaultTopicsBySubject[subject];
+}
+
+function syncTopicForSubject() {
+  const subject = subjectInput.value;
+  setTopicOptions(subject);
+  topicInput.value = defaultTopicsBySubject[subject];
 }
 
 function setStatus(message, type = "") {
@@ -233,6 +282,8 @@ function loadSample() {
 }
 
 apiUrlInput.value = defaultApiUrl();
+initializeRequestDefaults();
 form.addEventListener("submit", generateProblem);
+subjectInput.addEventListener("change", syncTopicForSubject);
 sampleButton.addEventListener("click", loadSample);
 loadSample();
