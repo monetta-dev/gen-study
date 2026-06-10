@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Generated Problem Viewer</title>
+    <title>Gen Study</title>
     <link rel="stylesheet" href="./styles.css">
     <script>
       window.MathJax = {
@@ -15,26 +15,79 @@
       };
     </script>
     <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+    <script defer src="./config.js"></script>
     <script defer src="./app.js"></script>
   </head>
   <body>
     <main class="app-shell">
-      <section class="input-panel" aria-label="JSON input">
+      <section class="request-panel" aria-label="Generation request">
         <div class="panel-header">
           <div>
-            <h1>Generated Problem Viewer</h1>
-            <p>Paste or upload a `/generate` JSON response.</p>
-          </div>
-          <div class="actions">
-            <label class="file-button">
-              <input id="fileInput" type="file" accept="application/json,.json">
-              Upload
-            </label>
-            <button id="sampleButton" type="button">Sample</button>
-            <button id="renderButton" type="button">Render</button>
+            <h1>Gen Study</h1>
+            <p>Generate Japanese entrance exam questions with verified answers.</p>
           </div>
         </div>
-        <textarea id="jsonInput" spellcheck="false" aria-label="Generated JSON"></textarea>
+
+        <form id="generateForm" class="generation-form">
+          <div class="field-grid">
+            <label>
+              <span>Subject</span>
+              <select id="subjectInput" name="subject">
+                <option value="mathematics">Mathematics</option>
+                <option value="physics">Physics</option>
+                <option value="chemistry">Chemistry</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Difficulty Level</span>
+              <input id="levelInput" name="level" type="text" list="levelOptions" value="University of Tokyo" required>
+            </label>
+
+            <label class="wide-field">
+              <span>Topic</span>
+              <input id="topicInput" name="topic" type="text" list="topicOptions" value="Mechanics" required>
+            </label>
+          </div>
+
+          <datalist id="levelOptions">
+            <option value="Standard"></option>
+            <option value="MARCH"></option>
+            <option value="Waseda"></option>
+            <option value="Keio"></option>
+            <option value="Kyoto University"></option>
+            <option value="University of Tokyo"></option>
+          </datalist>
+
+          <datalist id="topicOptions">
+            <option value="Probability Recurrence Relations"></option>
+            <option value="Integer Problems"></option>
+            <option value="Mechanics"></option>
+            <option value="Electromagnetism"></option>
+            <option value="Acid-Base Titration"></option>
+            <option value="Chemical Equilibrium"></option>
+          </datalist>
+
+          <details class="connection-settings">
+            <summary>Connection</summary>
+            <div class="field-grid connection-grid">
+              <label class="wide-field">
+                <span>API URL</span>
+                <input id="apiUrlInput" name="apiUrl" type="url">
+              </label>
+              <label class="wide-field">
+                <span>API Key</span>
+                <input id="apiKeyInput" name="apiKey" type="password" autocomplete="off">
+              </label>
+            </div>
+          </details>
+
+          <div class="actions">
+            <button id="sampleButton" type="button">Load Sample</button>
+            <button id="generateButton" type="submit">Generate</button>
+          </div>
+        </form>
+
         <p id="statusMessage" class="status" role="status"></p>
       </section>
 
@@ -48,8 +101,12 @@
           <div class="section-label">Solution</div>
           <div id="solutionOutput" class="rendered-text empty">No solution loaded.</div>
         </article>
-
       </section>
+
+      <details class="raw-panel">
+        <summary>Raw Response</summary>
+        <pre id="rawOutput">{}</pre>
+      </details>
     </main>
   </body>
 </html>

@@ -48,6 +48,9 @@ class FakeHandlerForSendJson:
     def end_headers(self):
         self.ended = True
 
+    def _send_cors_headers(self):
+        return
+
     def log_message(self, format, *args):
         raise AssertionError("log_message should not be called when debug_tracebacks is false")
 
@@ -80,6 +83,22 @@ class ApiTests(unittest.TestCase):
         )
         with urllib.request.urlopen(request, timeout=5) as response:
             return response.status, json.loads(response.read().decode("utf-8"))
+
+    def get(self, server, path):
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}{path}",
+            method="GET",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, response.headers, response.read().decode("utf-8")
+
+    def options(self, server, path):
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}{path}",
+            method="OPTIONS",
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, response.headers
 
     def test_generate_endpoint_returns_verified_problem(self):
         service = MathGenerationService(
@@ -205,6 +224,38 @@ class ApiTests(unittest.TestCase):
         error.close()
         self.assertEqual(payload["error"], "invalid_request")
         self.assertIn("at most 10 bytes", payload["detail"])
+
+    def test_root_serves_frontend(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([])),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        server = self.start_server(service)
+
+        status, headers, body = self.get(server, "/")
+
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", headers["Content-Type"])
+        self.assertIn("generateForm", body)
+
+    def test_options_returns_cors_headers(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([])),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        server = self.start_server(service, allowed_origin="https://example.test")
+
+        status, headers = self.options(server, "/generate")
+
+        self.assertEqual(status, 204)
+        self.assertEqual(headers["Access-Control-Allow-Origin"], "https://example.test")
+        self.assertIn("X-API-Key", headers["Access-Control-Allow-Headers"])
 
     def test_send_json_ignores_disconnected_clients(self):
         handler = FakeHandlerForSendJson()

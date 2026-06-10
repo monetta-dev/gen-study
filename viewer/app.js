@@ -1,22 +1,41 @@
 const sampleResponse = {
   status: "success",
-  problem:
-    "二次関数 $y=x^2-2x$ の最小値を求めよ。",
-  solution:
-    "平方完成すると $y=(x-1)^2-1$ である。よって最小値は $-1$ である。"
+  problem: "二次関数 $y=x^2-2x$ の最小値を求めよ。",
+  solution: "平方完成すると $y=(x-1)^2-1$ である。よって最小値は $-1$ である。"
 };
 
-const jsonInput = document.getElementById("jsonInput");
-const fileInput = document.getElementById("fileInput");
-const renderButton = document.getElementById("renderButton");
+const form = document.getElementById("generateForm");
+const subjectInput = document.getElementById("subjectInput");
+const levelInput = document.getElementById("levelInput");
+const topicInput = document.getElementById("topicInput");
+const apiUrlInput = document.getElementById("apiUrlInput");
+const apiKeyInput = document.getElementById("apiKeyInput");
 const sampleButton = document.getElementById("sampleButton");
+const generateButton = document.getElementById("generateButton");
 const statusMessage = document.getElementById("statusMessage");
 const problemOutput = document.getElementById("problemOutput");
 const solutionOutput = document.getElementById("solutionOutput");
+const rawOutput = document.getElementById("rawOutput");
+
+function defaultApiUrl() {
+  const configuredApiUrl = window.GEN_STUDY_CONFIG && window.GEN_STUDY_CONFIG.apiUrl;
+  if (configuredApiUrl) {
+    return configuredApiUrl;
+  }
+  if (window.location.protocol === "http:" || window.location.protocol === "https:") {
+    return `${window.location.origin}/generate`;
+  }
+  return "http://127.0.0.1:8000/generate";
+}
 
 function setStatus(message, type = "") {
   statusMessage.textContent = message;
   statusMessage.className = `status ${type}`.trim();
+}
+
+function setLoading(isLoading) {
+  generateButton.disabled = isLoading;
+  generateButton.textContent = isLoading ? "Generating..." : "Generate";
 }
 
 function clearNode(node) {
@@ -56,23 +75,19 @@ async function typeset() {
   }
 }
 
-async function renderFromInput() {
-  let data;
-  try {
-    data = JSON.parse(jsonInput.value);
-  } catch (error) {
-    setStatus(`Invalid JSON: ${error.message}`, "error");
-    return;
-  }
+async function renderResponse(data) {
+  rawOutput.textContent = JSON.stringify(data, null, 2);
 
-  if (data.status && data.status !== "success") {
-    setStatus(`Response status is "${data.status}". Rendering available fields.`, "error");
+  if (data.status === "success") {
+    appendTextWithBreaks(problemOutput, data.problem);
+    appendTextWithBreaks(solutionOutput, data.solution);
+    setStatus("Generation completed.", "ok");
   } else {
-    setStatus("Rendered successfully.", "ok");
+    const detail = data.detail || data.reason || data.error || "Generation failed.";
+    appendTextWithBreaks(problemOutput, data.problem);
+    appendTextWithBreaks(solutionOutput, data.solution);
+    setStatus(detail, "error");
   }
-
-  appendTextWithBreaks(problemOutput, data.problem);
-  appendTextWithBreaks(solutionOutput, data.solution);
 
   try {
     await typeset();
@@ -81,21 +96,64 @@ async function renderFromInput() {
   }
 }
 
-fileInput.addEventListener("change", async () => {
-  const file = fileInput.files && fileInput.files[0];
-  if (!file) {
+function requestPayload() {
+  return {
+    subject: subjectInput.value,
+    level: levelInput.value.trim(),
+    topic: topicInput.value.trim()
+  };
+}
+
+async function generateProblem(event) {
+  event.preventDefault();
+
+  const payload = requestPayload();
+  if (!payload.level || !payload.topic) {
+    setStatus("Level and topic are required.", "error");
     return;
   }
-  jsonInput.value = await file.text();
-  renderFromInput();
-});
 
-sampleButton.addEventListener("click", () => {
-  jsonInput.value = JSON.stringify(sampleResponse, null, 2);
-  renderFromInput();
-});
+  const headers = {
+    "Content-Type": "application/json"
+  };
+  const apiKey = apiKeyInput.value.trim();
+  if (apiKey) {
+    headers["X-API-Key"] = apiKey;
+  }
 
-renderButton.addEventListener("click", renderFromInput);
+  setLoading(true);
+  setStatus("Generating. This can take several minutes.", "");
 
-jsonInput.value = JSON.stringify(sampleResponse, null, 2);
-renderFromInput();
+  try {
+    const response = await fetch(apiUrlInput.value.trim(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (error) {
+      throw new Error(`API returned non-JSON response: ${text.slice(0, 160)}`);
+    }
+    if (!response.ok && data.status !== "failed") {
+      await renderResponse(data);
+      return;
+    }
+    await renderResponse(data);
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function loadSample() {
+  renderResponse(sampleResponse);
+}
+
+apiUrlInput.value = defaultApiUrl();
+form.addEventListener("submit", generateProblem);
+sampleButton.addEventListener("click", loadSample);
+loadSample();

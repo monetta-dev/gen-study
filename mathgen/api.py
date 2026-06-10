@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hmac
 import json
+import mimetypes
 import os
 import traceback
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from .agents import (
@@ -22,6 +24,8 @@ from .agents import (
 from .deepseek import DeepSeekClient, DeepSeekError
 from .env import load_dotenv
 from .models import ContractError, GenerateRequest
+
+VIEWER_ROOT = Path(__file__).resolve().parents[1] / "viewer"
 
 
 def build_service() -> MathGenerationService:
@@ -72,12 +76,32 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
     debug_tracebacks = False
     api_key = ""
     max_body_bytes = 65536
+    allowed_origin = "*"
 
     def do_GET(self) -> None:
         if self.path == "/health":
             self._send_json(HTTPStatus.OK, {"status": "ok"})
             return
+        if (
+            self.path == "/"
+            or self.path == "/viewer"
+            or self.path.startswith("/viewer/")
+            or self.path in {"/app.js", "/config.js", "/styles.css"}
+        ):
+            self._send_static()
+            return
         self._send_json(HTTPStatus.NOT_FOUND, {"status": "error", "error": "not_found"})
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self._send_cors_headers()
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header(
+            "Access-Control-Allow-Headers",
+            "Content-Type, X-API-Key, Authorization",
+        )
+        self.send_header("Access-Control-Max-Age", "86400")
+        self.end_headers()
 
     def do_POST(self) -> None:
         if self.path != "/generate":
@@ -162,6 +186,7 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         try:
             self.send_response(status)
+            self._send_cors_headers()
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -169,6 +194,44 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             if self.debug_tracebacks:
                 self.log_message("client disconnected before response could be sent")
+
+    def _send_static(self) -> None:
+        path = self.path.split("?", 1)[0]
+        relative_path = "index.html"
+        if path.startswith("/viewer/"):
+            relative_path = path[len("/viewer/") :] or "index.html"
+        elif path == "/viewer":
+            relative_path = "index.html"
+        elif path in {"/app.js", "/config.js", "/styles.css"}:
+            relative_path = path.lstrip("/")
+
+        target = (VIEWER_ROOT / relative_path).resolve()
+        if VIEWER_ROOT not in target.parents and target != VIEWER_ROOT:
+            self._send_json(
+                HTTPStatus.NOT_FOUND,
+                {"status": "error", "error": "not_found"},
+            )
+            return
+        if not target.is_file():
+            self._send_json(
+                HTTPStatus.NOT_FOUND,
+                {"status": "error", "error": "not_found"},
+            )
+            return
+
+        body = target.read_bytes()
+        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        self.send_response(HTTPStatus.OK)
+        self._send_cors_headers()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_cors_headers(self) -> None:
+        if self.allowed_origin:
+            self.send_header("Access-Control-Allow-Origin", self.allowed_origin)
+            self.send_header("Vary", "Origin")
 
 
 def create_server(
@@ -178,6 +241,7 @@ def create_server(
     debug_tracebacks: bool = False,
     api_key: str = "",
     max_body_bytes: int = 65536,
+    allowed_origin: str = "*",
 ) -> ThreadingHTTPServer:
     class Handler(MathGenerationHandler):
         pass
@@ -186,6 +250,7 @@ def create_server(
     Handler.debug_tracebacks = debug_tracebacks
     Handler.api_key = api_key
     Handler.max_body_bytes = max_body_bytes
+    Handler.allowed_origin = allowed_origin
     return ThreadingHTTPServer((host, port), Handler)
 
 
@@ -197,12 +262,14 @@ def main() -> None:
     debug_tracebacks = _env_flag("API_DEBUG")
     api_key = _env_string("GEN_STUDY_API_KEY")
     max_body_bytes = _env_int("API_MAX_BODY_BYTES", 65536)
+    allowed_origin = _env_string("API_ALLOWED_ORIGIN", "*")
     server = create_server(
         host=host,
         port=port,
         debug_tracebacks=debug_tracebacks,
         api_key=api_key,
         max_body_bytes=max_body_bytes,
+        allowed_origin=allowed_origin,
     )
     print(f"Serving exam question generation API on http://{host}:{port}")
     if api_key:

@@ -23,6 +23,7 @@ Requests containing `allow_visuals` or `allow_diagram` are rejected by this API.
 - Optional: `API_PORT`, defaults to `8000`
 - Optional: `API_DEBUG`, defaults to `false`
 - Optional: `API_MAX_BODY_BYTES`, defaults to `65536`
+- Optional: `API_ALLOWED_ORIGIN`, defaults to `*`
 - Optional: `GEN_STUDY_API_KEY`; when set, `POST /generate` requires this key
 
 The implementation uses only the Python standard library.
@@ -44,6 +45,7 @@ GENERATION_TRACE=false
 API_HOST=127.0.0.1
 API_PORT=8000
 API_DEBUG=false
+API_ALLOWED_ORIGIN=*
 GEN_STUDY_API_KEY=
 ```
 
@@ -93,6 +95,7 @@ Authorization: Bearer replace_with_a_long_random_secret
 ```
 
 `GET /health` does not require authentication so load balancers can check the service.
+The GUI is served from `GET /` and static assets are served from `/viewer/`.
 
 ## Validation Flow
 
@@ -156,34 +159,27 @@ If validation and repair attempts still fail, the API returns HTTP 422 with `sta
 
 For backward compatibility, requests without `subject` are treated as `mathematics`.
 
-## Viewer
+## GUI
 
-A static viewer is available at `viewer/index.html`. It renders generated JSON responses with LaTeX formatting.
+Start the API and open:
 
-Open it directly in a browser:
-
-```bash
-xdg-open viewer/index.html
+```text
+http://127.0.0.1:8000/
 ```
 
-Or start a local static file server:
+The GUI lets users enter `subject`, `level`, and `topic`, call `POST /generate`,
+and render the returned problem and solution with LaTeX formatting. If
+`GEN_STUDY_API_KEY` is configured, enter the same key in the GUI connection
+settings.
 
-```bash
-python3 -m http.server 8080
+On Render, open the deployed service URL directly:
+
+```text
+https://your-service-name.onrender.com/
 ```
 
-Then open `http://127.0.0.1:8080/viewer/`.
-
-Save an API response and load it in the viewer:
-
-```bash
-curl --max-time 600 -X POST http://127.0.0.1:8000/generate \
-  -H 'Content-Type: application/json' \
-  -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics"}' \
-  -o generated-response.json
-```
-
-The viewer uses MathJax from a CDN, so LaTeX rendering needs browser access to that script. The raw text still displays if MathJax is unavailable.
+The viewer uses MathJax from a CDN, so LaTeX rendering needs browser access to
+that script. The raw text still displays if MathJax is unavailable.
 
 ## Test
 
