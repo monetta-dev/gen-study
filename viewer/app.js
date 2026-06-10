@@ -1,7 +1,8 @@
 const sampleResponse = {
   status: "success",
   problem: "二次関数 $y=x^2-2x$ の最小値を求めよ。",
-  solution: "平方完成すると $y=(x-1)^2-1$ である。よって最小値は $-1$ である。"
+  solution:
+    "\\textbf{(1)} 平方完成すると $y=(x-1)^2-1$ である。\n\n\\begin{enumerate}\n\\item 頂点は $(1,-1)$ である。\n\\item よって最小値は $-1$ である。\n\\end{enumerate}"
 };
 
 const form = document.getElementById("generateForm");
@@ -44,28 +45,106 @@ function clearNode(node) {
   }
 }
 
-function appendTextWithBreaks(container, value) {
+function normalizeTextLatex(value) {
+  return String(value || "")
+    .replace(/(?:\$\$|\\\[)\s*(\\begin\{(enumerate|itemize)\}[\s\S]*?\\end\{\2\})\s*(?:\$\$|\\\])/g, "$1")
+    .replace(/\\\((\\begin\{(enumerate|itemize)\}[\s\S]*?\\end\{\2\})\\\)/g, "$1");
+}
+
+function appendInlineLatex(container, value) {
+  const text = String(value || "");
+  const mathPattern = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$]*?\$)/g;
+  let cursor = 0;
+  let match;
+
+  while ((match = mathPattern.exec(text)) !== null) {
+    appendTextCommands(container, text.slice(cursor, match.index));
+    container.appendChild(document.createTextNode(match[0]));
+    cursor = match.index + match[0].length;
+  }
+
+  appendTextCommands(container, text.slice(cursor));
+}
+
+function appendTextCommands(container, value) {
+  const commandPattern = /\\(textbf|emph)\{([^{}]*)\}/g;
+  let cursor = 0;
+  let match;
+
+  while ((match = commandPattern.exec(value)) !== null) {
+    appendPlainTextWithLineBreaks(container, value.slice(cursor, match.index));
+    const element = document.createElement(match[1] === "textbf" ? "strong" : "em");
+    element.textContent = match[2];
+    container.appendChild(element);
+    cursor = match.index + match[0].length;
+  }
+
+  appendPlainTextWithLineBreaks(container, value.slice(cursor));
+}
+
+function appendPlainTextWithLineBreaks(container, value) {
+  const lines = String(value || "").split(/\n/);
+  lines.forEach((line, index) => {
+    if (index > 0) {
+      container.appendChild(document.createElement("br"));
+    }
+    if (line) {
+      container.appendChild(document.createTextNode(line));
+    }
+  });
+}
+
+function appendParagraph(container, value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return;
+  }
+  const paragraph = document.createElement("p");
+  appendInlineLatex(paragraph, text);
+  container.appendChild(paragraph);
+}
+
+function appendList(container, kind, value) {
+  const list = document.createElement(kind === "enumerate" ? "ol" : "ul");
+  list.className = "latex-list";
+  const items = value.split(/\\item\b/).map((item) => item.trim()).filter(Boolean);
+
+  items.forEach((item) => {
+    const listItem = document.createElement("li");
+    appendInlineLatex(listItem, item);
+    list.appendChild(listItem);
+  });
+
+  if (list.children.length > 0) {
+    container.appendChild(list);
+  }
+}
+
+function appendRichText(container, value) {
   clearNode(container);
   container.classList.remove("empty");
 
-  const text = String(value || "").trim();
+  const text = normalizeTextLatex(value).trim();
   if (!text) {
     container.textContent = "No content loaded.";
     container.classList.add("empty");
     return;
   }
 
-  const blocks = text.split(/\n{2,}/);
-  blocks.forEach((block) => {
-    const paragraph = document.createElement("p");
-    const lines = block.split(/\n/);
-    lines.forEach((line, index) => {
-      if (index > 0) {
-        paragraph.appendChild(document.createElement("br"));
-      }
-      paragraph.appendChild(document.createTextNode(line));
+  const environmentPattern = /\\begin\{(enumerate|itemize)\}([\s\S]*?)\\end\{\1\}/g;
+  let cursor = 0;
+  let match;
+
+  while ((match = environmentPattern.exec(text)) !== null) {
+    text.slice(cursor, match.index).split(/\n{2,}/).forEach((block) => {
+      appendParagraph(container, block);
     });
-    container.appendChild(paragraph);
+    appendList(container, match[1], match[2]);
+    cursor = match.index + match[0].length;
+  }
+
+  text.slice(cursor).split(/\n{2,}/).forEach((block) => {
+    appendParagraph(container, block);
   });
 }
 
@@ -79,13 +158,13 @@ async function renderResponse(data) {
   rawOutput.textContent = JSON.stringify(data, null, 2);
 
   if (data.status === "success") {
-    appendTextWithBreaks(problemOutput, data.problem);
-    appendTextWithBreaks(solutionOutput, data.solution);
+    appendRichText(problemOutput, data.problem);
+    appendRichText(solutionOutput, data.solution);
     setStatus("Generation completed.", "ok");
   } else {
     const detail = data.detail || data.reason || data.error || "Generation failed.";
-    appendTextWithBreaks(problemOutput, data.problem);
-    appendTextWithBreaks(solutionOutput, data.solution);
+    appendRichText(problemOutput, data.problem);
+    appendRichText(solutionOutput, data.solution);
     setStatus(detail, "error");
   }
 

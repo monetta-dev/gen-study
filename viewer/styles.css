@@ -209,6 +209,16 @@ button:disabled {
   margin-top: 12px;
 }
 
+.latex-list {
+  margin: 12px 0 0 1.5rem;
+  padding: 0;
+}
+
+.latex-list li {
+  margin-top: 6px;
+  padding-left: 4px;
+}
+
 .empty {
   color: var(--muted);
 }
