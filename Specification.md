@@ -58,7 +58,7 @@ Two independent agents (LLMs), "Generator" and "Validator", collaborate within t
 
 * **Role**: Creates original entrance exam questions (written/structured formats) tailored to the specified difficulty level and topic.
 
-* **Model**: configured by environment variables such as `LLM_MODEL`
+* **Model**: configured by environment variables such as `OPENCODE_GO_MODEL`
 
 
 
@@ -66,7 +66,7 @@ Two independent agents (LLMs), "Generator" and "Validator", collaborate within t
 
 * **Role**: Cross-checks and filters the generated questions and solutions.
 
-* **Model**: configured by environment variables such as `LLM_MODEL`
+* **Model**: configured by environment variables such as `OPENCODE_GO_MODEL`
 
 * **Mandatory Checklist**:
 

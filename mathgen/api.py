@@ -23,8 +23,8 @@ from .agents import (
     MathGenerationService,
     RepairAgent,
 )
-from .deepseek import DeepSeekClient, DeepSeekError
 from .env import load_dotenv
+from .llm import LLMError, OpenCodeGoClient
 from .models import ContractError, GenerateRequest
 
 VIEWER_ROOT = Path(__file__).resolve().parents[1] / "viewer"
@@ -33,11 +33,11 @@ VIEWER_ROOT = Path(__file__).resolve().parents[1] / "viewer"
 def build_service() -> MathGenerationService:
     load_dotenv()
     tracer = InteractionTracer(enabled=_env_flag("GENERATION_TRACE"))
-    generator_client = DeepSeekClient()
-    adjudicator_client = DeepSeekClient()
-    repair_client = DeepSeekClient()
-    critical_validator_client = DeepSeekClient()
-    compliance_validator_client = DeepSeekClient()
+    generator_client = OpenCodeGoClient()
+    adjudicator_client = OpenCodeGoClient()
+    repair_client = OpenCodeGoClient()
+    critical_validator_client = OpenCodeGoClient()
+    compliance_validator_client = OpenCodeGoClient()
     return MathGenerationService(
         generator=GeneratorAgent(generator_client, tracer=tracer),
         adjudicator=AdjudicatorAgent(adjudicator_client, tracer=tracer),
@@ -48,6 +48,7 @@ def build_service() -> MathGenerationService:
         compliance_validator=ComplianceValidatorAgent(
             compliance_validator_client, tracer=tracer
         ),
+        max_repair_attempts=_env_optional_int("MAX_REPAIR_ATTEMPTS"),
         tracer=tracer,
     )
 
@@ -60,6 +61,19 @@ def _env_int(name: str, default: int) -> int:
     value = os.getenv(name, "").strip()
     if not value:
         return default
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ContractError(f"`{name}` must be an integer") from exc
+    if parsed < 0:
+        raise ContractError(f"`{name}` must be non-negative")
+    return parsed
+
+
+def _env_optional_int(name: str) -> int | None:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return None
     try:
         parsed = int(value)
     except ValueError as exc:
@@ -134,7 +148,7 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
                 },
             )
             return
-        except DeepSeekError as exc:
+        except LLMError as exc:
             self._log_error(request_id, "llm_api_error", exc)
             self._send_json(
                 HTTPStatus.BAD_GATEWAY,

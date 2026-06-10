@@ -422,10 +422,10 @@ class MathGenerationService:
         repair_agent: RepairAgent,
         critical_validator: CriticalValidatorAgent,
         compliance_validator: ComplianceValidatorAgent,
-        max_repair_attempts: int = 3,
+        max_repair_attempts: int | None = None,
         tracer: InteractionTracer | None = None,
     ) -> None:
-        if max_repair_attempts < 0:
+        if max_repair_attempts is not None and max_repair_attempts < 0:
             raise ValueError("max_repair_attempts must be at least 0")
         self.generator = generator
         self.adjudicator = adjudicator
@@ -441,7 +441,8 @@ class MathGenerationService:
         self.tracer.log_attempt(1, request)
         generated = self.generator.generate(request)
 
-        for repair_count in range(0, self.max_repair_attempts + 1):
+        repair_count = 0
+        while True:
             critical_validation = self.critical_validator.validate(request, generated)
             if not critical_validation.passed:
                 last_validation = ValidationResult(
@@ -482,6 +483,7 @@ class MathGenerationService:
                     )
                     if generated is None:
                         break
+                    repair_count += 1
                     continue
                 generated = self._repair_or_finish(
                     request,
@@ -493,6 +495,7 @@ class MathGenerationService:
                 )
                 if generated is None:
                     break
+                repair_count += 1
                 continue
 
             compliance_validation = self.compliance_validator.validate(request, generated)
@@ -523,6 +526,7 @@ class MathGenerationService:
             )
             if generated is None:
                 break
+            repair_count += 1
 
         assert last_validation is not None
         result = last_validation.to_failure_response()
@@ -538,7 +542,7 @@ class MathGenerationService:
         repair_count: int,
         adjudication: AdjudicationResult,
     ) -> GeneratedProblem | None:
-        if repair_count >= self.max_repair_attempts:
+        if self.max_repair_attempts is not None and repair_count >= self.max_repair_attempts:
             return None
         next_attempt = repair_count + 1
         self.tracer.log_repair_attempt(next_attempt, validation_stage, issues)
