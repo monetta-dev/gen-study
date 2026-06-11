@@ -154,6 +154,45 @@ class OpenCodeGoClientTests(unittest.TestCase):
 
         self.assertNotIn("stream", captured["payload"])
 
+    def test_anthropic_messages_preserve_multimodal_content_blocks(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return FakeAnthropicResponse()
+
+        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
+        os.environ["OPENCODE_GO_MODEL"] = "qwen3.7-plus"
+        os.environ["OPENCODE_GO_STREAM"] = "false"
+
+        client = OpenCodeGoClient()
+
+        with patch("urllib.request.urlopen", fake_urlopen):
+            client.chat(
+                [
+                    {"role": "system", "content": "Return strict JSON."},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Check this image."},
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": "png-base64",
+                                },
+                            },
+                        ],
+                    },
+                ]
+            )
+
+        self.assertEqual(
+            captured["payload"]["messages"][0]["content"][1]["source"]["data"],
+            "png-base64",
+        )
+
     def test_openai_compatible_opencode_model_uses_chat_completions(self):
         captured = {}
 

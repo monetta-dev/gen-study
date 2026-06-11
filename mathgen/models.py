@@ -10,11 +10,33 @@ class ContractError(ValueError):
     """Raised when API or agent payloads do not match the expected contract."""
 
 
+class ModelOutputError(RuntimeError):
+    """Raised when an LLM response cannot satisfy an agent output contract."""
+
+
 def _required_string(data: dict[str, Any], field: str) -> str:
     value = data.get(field)
     if not isinstance(value, str) or not value.strip():
         raise ContractError(f"`{field}` must be a non-empty string")
     return value.strip()
+
+
+def _optional_string(data: dict[str, Any], field: str, default: str = "") -> str:
+    value = data.get(field, default)
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise ContractError(f"`{field}` must be a string")
+    return value.strip()
+
+
+def _string_list(data: dict[str, Any], field: str) -> tuple[str, ...]:
+    value = data.get(field, [])
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ContractError(f"`{field}` must be an array of strings")
+    return tuple(item.strip() for item in value if item.strip())
 
 
 @dataclass(frozen=True)
@@ -41,6 +63,126 @@ class GenerateRequest:
             "level": self.level,
             "topic": self.topic,
             "subject": self.subject,
+        }
+
+
+@dataclass(frozen=True)
+class VisualGenerateRequest:
+    problem: str
+    solution: str
+    subject: str = "mathematics"
+    level: str = ""
+    topic: str = ""
+    placement_hint: str = "auto"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "VisualGenerateRequest":
+        return cls(
+            problem=_required_string(data, "problem"),
+            solution=_required_string(data, "solution"),
+            subject=_subject_string(data),
+            level=_optional_string(data, "level"),
+            topic=_optional_string(data, "topic"),
+            placement_hint=_optional_string(data, "placement_hint", "auto") or "auto",
+        )
+
+
+@dataclass(frozen=True)
+class VisualInstruction:
+    needed: bool
+    placement: str
+    purpose: str
+    prompt: str
+    must_include: tuple[str, ...]
+    must_not_include: tuple[str, ...]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "VisualInstruction":
+        needed = data.get("needed")
+        if not isinstance(needed, bool):
+            raise ContractError("`needed` must be a boolean")
+        placement = _optional_string(data, "placement", "none") or "none"
+        purpose = _optional_string(data, "purpose", "none") or "none"
+        prompt = _optional_string(data, "prompt")
+        if needed and not prompt:
+            raise ContractError("`prompt` must be a non-empty string when `needed` is true")
+        return cls(
+            needed=needed,
+            placement=placement,
+            purpose=purpose,
+            prompt=prompt,
+            must_include=_string_list(data, "must_include"),
+            must_not_include=_string_list(data, "must_not_include"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "needed": self.needed,
+            "placement": self.placement,
+            "purpose": self.purpose,
+            "prompt": self.prompt,
+            "must_include": list(self.must_include),
+            "must_not_include": list(self.must_not_include),
+        }
+
+
+@dataclass(frozen=True)
+class VisualFinding:
+    issue: str
+    evidence: str
+    severity: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "VisualFinding":
+        return cls(
+            issue=_required_string(data, "issue"),
+            evidence=_required_string(data, "evidence"),
+            severity=_optional_string(data, "severity", "major") or "major",
+        )
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "issue": self.issue,
+            "evidence": self.evidence,
+            "severity": self.severity,
+        }
+
+
+@dataclass(frozen=True)
+class VisualValidationResult:
+    status: str
+    confidence: float
+    findings: tuple[VisualFinding, ...]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "VisualValidationResult":
+        status = data.get("status")
+        if status not in {"pass", "repair_required", "uncertain"}:
+            raise ContractError(
+                "`status` must be `pass`, `repair_required`, or `uncertain`"
+            )
+        confidence = data.get("confidence", 0.0)
+        if not isinstance(confidence, (int, float)):
+            raise ContractError("`confidence` must be a number")
+        raw_findings = data.get("findings", [])
+        if not isinstance(raw_findings, list):
+            raise ContractError("`findings` must be an array")
+        findings = tuple(
+            VisualFinding.from_dict(item)
+            for item in raw_findings
+            if isinstance(item, dict)
+        )
+        return cls(
+            status=status,
+            confidence=max(0.0, min(1.0, float(confidence))),
+            findings=findings,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "confidence": self.confidence,
+            "findings": [finding.to_dict() for finding in self.findings],
         }
 
 

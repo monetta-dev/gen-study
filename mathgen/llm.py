@@ -90,7 +90,7 @@ class OpenCodeGoClient:
         self.retry_delay_seconds = _env_float("OPENCODE_GO_RETRY_DELAY_SECONDS", 10.0)
         self.user_agent = _env_string("OPENCODE_GO_USER_AGENT", "gen-study/0.1 OpenCode Go client")
 
-    def chat(self, messages: list[dict[str, str]]) -> str:
+    def chat(self, messages: list[dict[str, Any]]) -> str:
         if not self.api_key:
             raise LLMError("OPENCODE_GO_API_KEY is not configured")
         if self.api_style == "anthropic":
@@ -99,7 +99,7 @@ class OpenCodeGoClient:
             return self._chat_openai(messages)
         raise LLMError("OPENCODE_GO_API_STYLE must be `openai`, `anthropic`, or empty")
 
-    def _chat_openai(self, messages: list[dict[str, str]]) -> str:
+    def _chat_openai(self, messages: list[dict[str, Any]]) -> str:
         payload = {
             "model": self.model,
             "messages": messages,
@@ -128,7 +128,7 @@ class OpenCodeGoClient:
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             raise LLMError("OpenCode Go response did not match chat-completions format") from exc
 
-    def _chat_anthropic(self, messages: list[dict[str, str]]) -> str:
+    def _chat_anthropic(self, messages: list[dict[str, Any]]) -> str:
         payload = {
             "model": self.model,
             "max_tokens": self.max_tokens,
@@ -246,14 +246,16 @@ class OpenCodeGoClient:
             raise LLMError("OpenCode Go streaming response did not include text content")
         return text
 
-    def _anthropic_system_prompt(self, messages: list[dict[str, str]]) -> str:
+    def _anthropic_system_prompt(self, messages: list[dict[str, Any]]) -> str:
         return "\n\n".join(
             message["content"]
             for message in messages
-            if message.get("role") == "system" and message.get("content")
+            if message.get("role") == "system"
+            and isinstance(message.get("content"), str)
+            and message.get("content")
         )
 
-    def _anthropic_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _anthropic_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         converted = []
         for message in messages:
             role = message.get("role")

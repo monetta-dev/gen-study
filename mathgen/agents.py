@@ -4,21 +4,23 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Protocol
+from typing import Any, Callable, Protocol, TypeVar
 
 from .json_utils import parse_json_object
 from .models import (
     AdjudicationResult,
     ComplianceValidationResult,
+    ContractError,
     CriticalValidationResult,
     GenerateRequest,
     GeneratedProblem,
+    ModelOutputError,
     ValidationResult,
 )
 
 
 class ChatClient(Protocol):
-    def chat(self, messages: list[dict[str, str]]) -> str:
+    def chat(self, messages: list[dict[str, Any]]) -> str:
         """Return the assistant content for the provided chat messages."""
 
 
@@ -35,13 +37,19 @@ class InteractionTracer:
         self.enabled = enabled
         self.writer = writer or sys.stdout
 
-    def log_request(self, agent_name: str, messages: list[dict[str, str]]) -> None:
+    def log_request(self, agent_name: str, messages: list[dict[str, Any]]) -> None:
         if not self.enabled:
             return
         self._write(f"\n--- {agent_name} request ---")
         for index, message in enumerate(messages, start=1):
             role = message.get("role", "unknown")
             content = message.get("content", "")
+            if not isinstance(content, str):
+                content = json.dumps(
+                    _redact_trace_content(content),
+                    ensure_ascii=False,
+                    indent=2,
+                )
             self._write(f"[{index}] role={role}\n{content}")
 
     def log_response(self, agent_name: str, content: str) -> None:
@@ -98,6 +106,58 @@ class InteractionTracer:
     def _write(self, text: str) -> None:
         self.writer.write(f"{text}\n")
         self.writer.flush()
+
+
+T = TypeVar("T")
+
+
+def chat_json(
+    agent_name: str,
+    client: ChatClient,
+    tracer: InteractionTracer,
+    messages: list[dict[str, Any]],
+    parser: Callable[[dict[str, Any]], T],
+    expected_schema: str,
+) -> T:
+    tracer.log_request(agent_name, messages)
+    content = client.chat(messages)
+    tracer.log_response(agent_name, content)
+    try:
+        return parser(parse_json_object(content))
+    except ContractError:
+        retry_messages = messages + [
+            {"role": "assistant", "content": content},
+            {
+                "role": "user",
+                "content": (
+                    "Your previous response was not valid for this API contract. "
+                    "Return only one strict JSON object matching exactly this shape: "
+                    f"{expected_schema}. Do not include markdown fences, commentary, "
+                    "or any text outside the JSON object."
+                ),
+            },
+        ]
+        tracer.log_request(f"{agent_name} JSON retry", retry_messages)
+        retry_content = client.chat(retry_messages)
+        tracer.log_response(f"{agent_name} JSON retry", retry_content)
+        try:
+            return parser(parse_json_object(retry_content))
+        except ContractError as retry_exc:
+            raise ModelOutputError(str(retry_exc)) from retry_exc
+
+
+def _redact_trace_content(content: object) -> object:
+    if isinstance(content, list):
+        return [_redact_trace_content(item) for item in content]
+    if isinstance(content, dict):
+        redacted = {}
+        for key, value in content.items():
+            if key == "data" and isinstance(value, str) and len(value) > 120:
+                redacted[key] = f"<base64 image redacted: {len(value)} chars>"
+            else:
+                redacted[key] = _redact_trace_content(value)
+        return redacted
+    return content
 
 
 SUBJECT_INSTRUCTIONS = {
@@ -257,10 +317,14 @@ class GeneratorAgent:
                 ),
             },
         ]
-        self.tracer.log_request("Generator", messages)
-        content = self.client.chat(messages)
-        self.tracer.log_response("Generator", content)
-        return GeneratedProblem.from_dict(parse_json_object(content))
+        return chat_json(
+            "Generator",
+            self.client,
+            self.tracer,
+            messages,
+            GeneratedProblem.from_dict,
+            '{"problem":"...","solution":"..."}',
+        )
 
 
 class RepairAgent:
@@ -299,10 +363,14 @@ class RepairAgent:
                 ),
             },
         ]
-        self.tracer.log_request("RepairAgent", messages)
-        content = self.client.chat(messages)
-        self.tracer.log_response("RepairAgent", content)
-        return GeneratedProblem.from_dict(parse_json_object(content))
+        return chat_json(
+            "RepairAgent",
+            self.client,
+            self.tracer,
+            messages,
+            GeneratedProblem.from_dict,
+            '{"problem":"...","solution":"..."}',
+        )
 
 
 class AdjudicatorAgent:
@@ -337,10 +405,17 @@ class AdjudicatorAgent:
                 ),
             },
         ]
-        self.tracer.log_request("Adjudicator", messages)
-        content = self.client.chat(messages)
-        self.tracer.log_response("Adjudicator", content)
-        adjudication = AdjudicationResult.from_dict(parse_json_object(content))
+        adjudication = chat_json(
+            "Adjudicator",
+            self.client,
+            self.tracer,
+            messages,
+            AdjudicationResult.from_dict,
+            (
+                '{"decision":"repair_required|validator_false_positive|'
+                'clarify_definition_required","reason":"...","repair_focus":"..."}'
+            ),
+        )
         self.tracer.log_adjudication_result(adjudication)
         return adjudication
 
@@ -374,10 +449,14 @@ class CriticalValidatorAgent:
             {"role": "system", "content": critical_validator_system_prompt(request.subject)},
             {"role": "user", "content": _validation_payload(request, generated)},
         ]
-        self.tracer.log_request("CriticalValidator", messages)
-        content = self.client.chat(messages)
-        self.tracer.log_response("CriticalValidator", content)
-        validation = CriticalValidationResult.from_dict(parse_json_object(content))
+        validation = chat_json(
+            "CriticalValidator",
+            self.client,
+            self.tracer,
+            messages,
+            CriticalValidationResult.from_dict,
+            '{"passed":true,"solution_accurate":true,"issues":[]}',
+        )
         self.tracer.log_validation_result(
             "CriticalValidator",
             validation.passed,
@@ -401,10 +480,14 @@ class ComplianceValidatorAgent:
             {"role": "system", "content": compliance_validator_system_prompt(request.subject)},
             {"role": "user", "content": _validation_payload(request, generated)},
         ]
-        self.tracer.log_request("ComplianceValidator", messages)
-        content = self.client.chat(messages)
-        self.tracer.log_response("ComplianceValidator", content)
-        validation = ComplianceValidationResult.from_dict(parse_json_object(content))
+        validation = chat_json(
+            "ComplianceValidator",
+            self.client,
+            self.tracer,
+            messages,
+            ComplianceValidationResult.from_dict,
+            '{"passed":true,"curriculum_compliant":true,"issues":[]}',
+        )
         self.tracer.log_validation_result(
             "ComplianceValidator",
             validation.passed,

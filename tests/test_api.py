@@ -13,6 +13,8 @@ from mathgen.agents import (
     RepairAgent,
 )
 from mathgen.api import MathGenerationHandler, create_server
+from mathgen.models import ModelOutputError
+from mathgen.openai_images import ImageGenerationError
 
 
 class FakeClient:
@@ -71,13 +73,13 @@ class ApiTests(unittest.TestCase):
         self.addCleanup(server.server_close)
         return server
 
-    def post_json(self, server, payload, headers=None):
+    def post_json(self, server, payload, headers=None, path="/generate"):
         body = json.dumps(payload).encode("utf-8")
         request_headers = {"Content-Type": "application/json"}
         if headers:
             request_headers.update(headers)
         request = urllib.request.Request(
-            f"http://127.0.0.1:{server.server_port}/generate",
+            f"http://127.0.0.1:{server.server_port}{path}",
             data=body,
             headers=request_headers,
             method="POST",
@@ -168,6 +170,30 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payload["error"], "internal_server_error")
         self.assertEqual(payload["detail"], "Unexpected server error")
         self.assertRegex(payload["request_id"], r"^[0-9a-f]{12}$")
+
+    def test_generate_endpoint_reports_model_output_errors_as_bad_gateway(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([ModelOutputError("Model response JSON was invalid")])),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        server = self.start_server(service)
+
+        with self.assertRaises(urllib.error.HTTPError) as context:
+            self.post_json(
+                server,
+                {"level": "University of Tokyo", "topic": "Probability Recurrence Relations"},
+            )
+
+        error = context.exception
+        self.assertEqual(error.code, 502)
+        payload = json.loads(error.read().decode("utf-8"))
+        error.close()
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["error"], "llm_output_error")
+        self.assertEqual(payload["detail"], "Model response JSON was invalid")
 
     def test_generate_endpoint_returns_debug_detail_when_enabled(self):
         service = MathGenerationService(
@@ -290,3 +316,80 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(handler.status, 200)
         self.assertTrue(handler.ended)
+
+    def test_visuals_generate_endpoint_returns_visual_asset(self):
+        class FakeVisualService:
+            def generate_visual(self, request):
+                return {
+                    "status": "success",
+                    "visual_needed": True,
+                    "visual_validation_status": "pass",
+                    "visual_assets": [
+                        {
+                            "mime_type": "image/png",
+                            "base64": "png-base64",
+                            "placement": "problem",
+                            "purpose": "diagram",
+                            "prompt": "Draw a cart.",
+                        }
+                    ],
+                    "instruction": {"needed": True},
+                    "validation": {"status": "pass"},
+                    "attempts": [],
+                }
+
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([])),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        server = self.start_server(service, visual_service=FakeVisualService())
+
+        status, payload = self.post_json(
+            server,
+            {
+                "subject": "physics",
+                "level": "University of Tokyo",
+                "topic": "Mechanics",
+                "problem": "問題文",
+                "solution": "解答",
+            },
+            path="/visuals/generate",
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["visual_assets"][0]["base64"], "png-base64")
+
+    def test_visuals_generate_endpoint_returns_image_generation_error(self):
+        class FakeVisualService:
+            def generate_visual(self, request):
+                raise ImageGenerationError("OPENAI_API_KEY is not configured")
+
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([])),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        server = self.start_server(service, visual_service=FakeVisualService())
+
+        with self.assertRaises(urllib.error.HTTPError) as context:
+            self.post_json(
+                server,
+                {
+                    "subject": "physics",
+                    "problem": "問題文",
+                    "solution": "解答",
+                },
+                path="/visuals/generate",
+            )
+
+        error = context.exception
+        self.assertEqual(error.code, 502)
+        payload = json.loads(error.read().decode("utf-8"))
+        error.close()
+        self.assertEqual(payload["error"], "image_generation_error")

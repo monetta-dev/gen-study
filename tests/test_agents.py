@@ -10,7 +10,7 @@ from mathgen.agents import (
     CriticalValidatorAgent,
     RepairAgent,
 )
-from mathgen.models import GenerateRequest
+from mathgen.models import GenerateRequest, ModelOutputError
 
 
 class FakeClient:
@@ -66,6 +66,54 @@ class AgentTests(unittest.TestCase):
         self.assertIn("Japanese Output", compliance_system_prompt)
         self.assertIn("Text-only Policy", compliance_system_prompt)
         self.assertIn("Subject: mathematics", generator_client.messages[0][1]["content"])
+
+    def test_generator_retries_once_after_invalid_json(self):
+        generator_client = FakeClient(
+            [
+                '{"problem":"broken"',
+                '{"problem":"問","solution":"解"}',
+            ]
+        )
+        service = MathGenerationService(
+            GeneratorAgent(generator_client),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(
+                FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
+            ),
+            ComplianceValidatorAgent(
+                FakeClient(['{"passed":true,"curriculum_compliant":true,"issues":[]}'])
+            ),
+        )
+
+        result = service.generate_verified(
+            GenerateRequest(level="University of Tokyo", topic="Mechanics")
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["problem"], "問")
+        self.assertEqual(len(generator_client.messages), 2)
+        self.assertIn("previous response was not valid", generator_client.messages[1][-1]["content"])
+
+    def test_generator_raises_model_output_error_after_json_retry_fails(self):
+        generator_client = FakeClient(
+            [
+                '{"problem":"broken"',
+                '{"problem":"still broken"',
+            ]
+        )
+        service = MathGenerationService(
+            GeneratorAgent(generator_client),
+            AdjudicatorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+
+        with self.assertRaises(ModelOutputError):
+            service.generate_verified(
+                GenerateRequest(level="University of Tokyo", topic="Mechanics")
+            )
 
     def test_service_repairs_after_validator_failure(self):
         generator_client = FakeClient(

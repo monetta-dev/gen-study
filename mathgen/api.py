@@ -25,7 +25,19 @@ from .agents import (
 )
 from .env import load_dotenv
 from .llm import LLMError, OpenCodeGoClient
-from .models import ContractError, GenerateRequest
+from .models import (
+    ContractError,
+    GenerateRequest,
+    ModelOutputError,
+    VisualGenerateRequest,
+)
+from .openai_images import ImageGenerationError, OpenAIImageClient
+from .visual_agents import (
+    VisualGenerationService,
+    VisualInstructionAgent,
+    VisualRepairAgent,
+    VisualValidatorAgent,
+)
 
 VIEWER_ROOT = Path(__file__).resolve().parents[1] / "viewer"
 
@@ -49,6 +61,23 @@ def build_service() -> MathGenerationService:
             compliance_validator_client, tracer=tracer
         ),
         max_repair_attempts=_env_optional_int("MAX_REPAIR_ATTEMPTS"),
+        tracer=tracer,
+    )
+
+
+def build_visual_service() -> VisualGenerationService:
+    load_dotenv()
+    tracer = InteractionTracer(enabled=_env_flag("GENERATION_TRACE"))
+    instruction_client = OpenCodeGoClient()
+    visual_validator_model = _env_string("VISUAL_VALIDATOR_MODEL") or "qwen3.7-plus"
+    validator_client = OpenCodeGoClient(model=visual_validator_model)
+    repair_client = OpenCodeGoClient(model=visual_validator_model)
+    return VisualGenerationService(
+        instruction_agent=VisualInstructionAgent(instruction_client, tracer=tracer),
+        image_client=OpenAIImageClient(),
+        validator=VisualValidatorAgent(validator_client, tracer=tracer),
+        repair_agent=VisualRepairAgent(repair_client, tracer=tracer),
+        max_repair_attempts=_env_int("VISUAL_REPAIR_ATTEMPTS", 2),
         tracer=tracer,
     )
 
@@ -89,6 +118,7 @@ def _env_string(name: str, default: str = "") -> str:
 
 class MathGenerationHandler(BaseHTTPRequestHandler):
     service: MathGenerationService | None = None
+    visual_service: VisualGenerationService | None = None
     debug_tracebacks = False
     api_key = ""
     max_body_bytes = 65536
@@ -121,9 +151,15 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         request_id = uuid.uuid4().hex[:12]
-        if self.path != "/generate":
-            self._send_json(HTTPStatus.NOT_FOUND, {"status": "error", "error": "not_found"})
+        if self.path == "/generate":
+            self._handle_generate(request_id)
             return
+        if self.path == "/visuals/generate":
+            self._handle_visual_generate(request_id)
+            return
+        self._send_json(HTTPStatus.NOT_FOUND, {"status": "error", "error": "not_found"})
+
+    def _handle_generate(self, request_id: str) -> None:
         if not self._is_authorized():
             self._send_json(
                 HTTPStatus.UNAUTHORIZED,
@@ -137,52 +173,125 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
             service = self.service or build_service()
             result = service.generate_verified(request)
         except ContractError as exc:
-            self._log_error(request_id, "invalid_request", exc)
-            self._send_json(
-                HTTPStatus.BAD_REQUEST,
-                {
-                    "status": "error",
-                    "error": "invalid_request",
-                    "detail": str(exc),
-                    "request_id": request_id,
-                },
-            )
+            self._send_contract_error(request_id, exc)
             return
         except LLMError as exc:
-            self._log_error(request_id, "llm_api_error", exc)
+            self._send_llm_error(request_id, exc)
+            return
+        except ModelOutputError as exc:
+            self._send_model_output_error(request_id, exc)
+            return
+        except json.JSONDecodeError:
+            self._send_json_error(request_id)
+            return
+        except Exception as exc:
+            self._send_internal_error(request_id, exc)
+            return
+
+        status = HTTPStatus.OK if result.get("status") == "success" else HTTPStatus.UNPROCESSABLE_ENTITY
+        self._send_json(status, result)
+
+    def _handle_visual_generate(self, request_id: str) -> None:
+        if not self._is_authorized():
+            self._send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"status": "error", "error": "unauthorized"},
+            )
+            return
+
+        try:
+            payload = self._read_json_body()
+            request = VisualGenerateRequest.from_dict(payload)
+            service = self.visual_service or build_visual_service()
+            result = service.generate_visual(request)
+        except ContractError as exc:
+            self._send_contract_error(request_id, exc)
+            return
+        except LLMError as exc:
+            self._send_llm_error(request_id, exc)
+            return
+        except ModelOutputError as exc:
+            self._send_model_output_error(request_id, exc)
+            return
+        except ImageGenerationError as exc:
+            self._log_error(request_id, "image_generation_error", exc)
             self._send_json(
                 HTTPStatus.BAD_GATEWAY,
                 {
                     "status": "error",
-                    "error": "llm_api_error",
+                    "error": "image_generation_error",
                     "detail": str(exc),
                     "request_id": request_id,
                 },
             )
             return
         except json.JSONDecodeError:
-            self._log_error(request_id, "invalid_json")
-            self._send_json(
-                HTTPStatus.BAD_REQUEST,
-                {"status": "error", "error": "invalid_json", "request_id": request_id},
-            )
+            self._send_json_error(request_id)
             return
         except Exception as exc:
-            self._log_error(request_id, "internal_server_error", exc)
-            detail = str(exc) if self.debug_tracebacks else "Unexpected server error"
-            self._send_json(
-                HTTPStatus.INTERNAL_SERVER_ERROR,
-                {
-                    "status": "error",
-                    "error": "internal_server_error",
-                    "detail": detail,
-                    "request_id": request_id,
-                },
-            )
+            self._send_internal_error(request_id, exc)
             return
 
         status = HTTPStatus.OK if result.get("status") == "success" else HTTPStatus.UNPROCESSABLE_ENTITY
         self._send_json(status, result)
+
+    def _send_contract_error(self, request_id: str, exc: ContractError) -> None:
+        self._log_error(request_id, "invalid_request", exc)
+        self._send_json(
+            HTTPStatus.BAD_REQUEST,
+            {
+                "status": "error",
+                "error": "invalid_request",
+                "detail": str(exc),
+                "request_id": request_id,
+            },
+        )
+
+    def _send_llm_error(self, request_id: str, exc: LLMError) -> None:
+        self._log_error(request_id, "llm_api_error", exc)
+        self._send_json(
+            HTTPStatus.BAD_GATEWAY,
+            {
+                "status": "error",
+                "error": "llm_api_error",
+                "detail": str(exc),
+                "request_id": request_id,
+            },
+        )
+
+    def _send_model_output_error(
+        self, request_id: str, exc: ModelOutputError
+    ) -> None:
+        self._log_error(request_id, "llm_output_error", exc)
+        self._send_json(
+            HTTPStatus.BAD_GATEWAY,
+            {
+                "status": "error",
+                "error": "llm_output_error",
+                "detail": str(exc),
+                "request_id": request_id,
+            },
+        )
+
+    def _send_json_error(self, request_id: str) -> None:
+        self._log_error(request_id, "invalid_json")
+        self._send_json(
+            HTTPStatus.BAD_REQUEST,
+            {"status": "error", "error": "invalid_json", "request_id": request_id},
+        )
+
+    def _send_internal_error(self, request_id: str, exc: Exception) -> None:
+        self._log_error(request_id, "internal_server_error", exc)
+        detail = str(exc) if self.debug_tracebacks else "Unexpected server error"
+        self._send_json(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            {
+                "status": "error",
+                "error": "internal_server_error",
+                "detail": detail,
+                "request_id": request_id,
+            },
+        )
 
     def log_message(self, format: str, *args: Any) -> None:
         return
@@ -281,6 +390,7 @@ def create_server(
     host: str = "127.0.0.1",
     port: int = 8000,
     service: MathGenerationService | None = None,
+    visual_service: VisualGenerationService | None = None,
     debug_tracebacks: bool = False,
     api_key: str = "",
     max_body_bytes: int = 65536,
@@ -290,6 +400,7 @@ def create_server(
         pass
 
     Handler.service = service
+    Handler.visual_service = visual_service
     Handler.debug_tracebacks = debug_tracebacks
     Handler.api_key = api_key
     Handler.max_body_bytes = max_body_bytes
@@ -316,10 +427,14 @@ def main() -> None:
     )
     print(f"Serving exam question generation API on http://{host}:{port}")
     if api_key:
-        print("API key authentication is enabled for POST /generate")
+        print("API key authentication is enabled for POST /generate and /visuals/generate")
     print(
         "POST /generate with JSON: "
         "{\"subject\":\"chemistry\",\"level\":\"University of Tokyo\",\"topic\":\"Acid-Base Titration\"}"
+    )
+    print(
+        "POST /visuals/generate with JSON: "
+        "{\"subject\":\"physics\",\"problem\":\"...\",\"solution\":\"...\"}"
     )
     server.serve_forever()
 

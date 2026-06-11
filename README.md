@@ -16,6 +16,15 @@ Requests containing `allow_visuals` or `allow_diagram` are rejected by this API.
 - Python 3.11+
 - `OPENCODE_GO_API_KEY` in `.env` or the shell environment
 - Optional: `OPENCODE_GO_MODEL`, defaults to `qwen3.7-max`
+- Optional future visual API setting: `VISUAL_VALIDATOR_MODEL`, defaults to `qwen3.7-plus`
+- Optional visual API setting: `OPENAI_API_KEY`, required for `POST /visuals/generate`
+- Optional visual API setting: `OPENAI_IMAGE_MODEL`, defaults to `gpt-image-2`
+- Optional visual API setting: `OPENAI_IMAGE_SIZE`; blank means omitted
+- Optional visual API setting: `OPENAI_IMAGE_QUALITY`; blank means omitted
+- Optional visual API setting: `OPENAI_IMAGE_N`; blank means omitted
+- Optional visual API setting: `OPENAI_IMAGE_RETRY_ATTEMPTS`, defaults to `1`
+- Optional visual API setting: `OPENAI_IMAGE_RETRY_DELAY_SECONDS`, defaults to `60`
+- Optional visual API setting: `VISUAL_REPAIR_ATTEMPTS`, defaults to `2`
 - Optional: `OPENCODE_GO_BASE_URL`, defaults to `https://opencode.ai/zen/go/v1`
 - Optional: `OPENCODE_GO_API_STYLE`; normally omitted and inferred from the model
 - Optional: `OPENCODE_GO_TIMEOUT_SECONDS`, defaults to `300`
@@ -50,12 +59,21 @@ Then edit `.env` and set your actual API key:
 ```dotenv
 OPENCODE_GO_API_KEY=your_opencode_go_api_key_here
 OPENCODE_GO_MODEL=qwen3.7-max
+VISUAL_VALIDATOR_MODEL=qwen3.7-plus
 OPENCODE_GO_STREAM=true
 OPENCODE_GO_TIMEOUT_SECONDS=300
 OPENCODE_GO_THINKING_ENABLED=true
 OPENCODE_GO_THINKING_DISPLAY=omitted
 OPENCODE_GO_RETRY_ATTEMPTS=1
 OPENCODE_GO_RETRY_DELAY_SECONDS=10
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_IMAGE_MODEL=gpt-image-2
+OPENAI_IMAGE_SIZE=
+OPENAI_IMAGE_QUALITY=
+OPENAI_IMAGE_N=
+OPENAI_IMAGE_RETRY_ATTEMPTS=1
+OPENAI_IMAGE_RETRY_DELAY_SECONDS=60
+VISUAL_REPAIR_ATTEMPTS=2
 MAX_REPAIR_ATTEMPTS=
 GENERATION_TRACE=false
 API_HOST=127.0.0.1
@@ -140,6 +158,35 @@ OpenCode Go models currently handled as Anthropic-compatible `/messages`:
 - `minimax-m2.7`
 - `minimax-m2.5`
 
+For visual generation, the API first asks a visual instruction agent whether a
+diagram, graph, chemical structure, or explanatory figure is needed for the
+completed problem and solution. If needed, it sends that final natural-language
+prompt to OpenAI's Image API using `OPENAI_IMAGE_MODEL`, then validates the PNG
+with `qwen3.7-plus` through OpenCode Go.
+
+Use `qwen3.7-plus` as the default image-recognition validator model:
+
+```dotenv
+VISUAL_VALIDATOR_MODEL=qwen3.7-plus
+```
+
+Configure the OpenAI image generation side separately:
+
+```dotenv
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_IMAGE_MODEL=gpt-image-2
+OPENAI_IMAGE_SIZE=
+OPENAI_IMAGE_QUALITY=
+OPENAI_IMAGE_N=
+OPENAI_IMAGE_RETRY_ATTEMPTS=1
+OPENAI_IMAGE_RETRY_DELAY_SECONDS=60
+VISUAL_REPAIR_ATTEMPTS=2
+```
+
+The text-only `/generate` endpoint does not read these visual settings. The
+visual API uses a separate OpenCode Go client for image validation so validator
+cost and quality can be tuned independently from the main text generation model.
+
 OpenCode Go models currently handled as OpenAI-compatible `/chat/completions`:
 
 - `glm-5.1`
@@ -216,6 +263,37 @@ curl -X POST http://127.0.0.1:8000/generate \
   -H 'Content-Type: application/json' \
   -d '{"subject":"mathematics","level":"University of Tokyo","topic":"Probability Recurrence Relations"}'
 ```
+
+Generate a visual asset from a completed problem and solution:
+
+```bash
+curl -X POST http://127.0.0.1:8000/visuals/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics","problem":"問題文...","solution":"解答..."}'
+```
+
+If a visual is needed, the response includes one PNG asset as base64:
+
+```json
+{
+  "status": "success",
+  "visual_needed": true,
+  "visual_validation_status": "pass",
+  "visual_assets": [
+    {
+      "mime_type": "image/png",
+      "base64": "...",
+      "placement": "problem",
+      "purpose": "diagram",
+      "prompt": "..."
+    }
+  ]
+}
+```
+
+If the vision validator is uncertain, the API preserves the generated image and
+returns `visual_validation_status: "uncertain"` instead of automatically
+rewriting a likely acceptable figure.
 
 With API key authentication enabled:
 
