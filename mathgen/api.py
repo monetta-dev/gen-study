@@ -42,9 +42,12 @@ from .visual_agents import (
 VIEWER_ROOT = Path(__file__).resolve().parents[1] / "viewer"
 
 
-def build_service() -> MathGenerationService:
+def build_service(capture_trace: bool = False) -> MathGenerationService:
     load_dotenv()
-    tracer = InteractionTracer(enabled=_env_flag("GENERATION_TRACE"))
+    tracer = InteractionTracer(
+        enabled=_env_flag("GENERATION_TRACE"),
+        capture=capture_trace,
+    )
     generator_client = OpenCodeGoClient()
     adjudicator_client = OpenCodeGoClient()
     repair_client = OpenCodeGoClient()
@@ -65,9 +68,12 @@ def build_service() -> MathGenerationService:
     )
 
 
-def build_visual_service() -> VisualGenerationService:
+def build_visual_service(capture_trace: bool = False) -> VisualGenerationService:
     load_dotenv()
-    tracer = InteractionTracer(enabled=_env_flag("GENERATION_TRACE"))
+    tracer = InteractionTracer(
+        enabled=_env_flag("GENERATION_TRACE"),
+        capture=capture_trace,
+    )
     instruction_client = OpenCodeGoClient()
     visual_validator_model = _env_string("VISUAL_VALIDATOR_MODEL") or "qwen3.7-plus"
     validator_client = OpenCodeGoClient(model=visual_validator_model)
@@ -114,6 +120,15 @@ def _env_optional_int(name: str) -> int | None:
 
 def _env_string(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
+
+
+def _payload_trace_enabled(payload: dict[str, Any]) -> bool:
+    value = payload.get("trace", False)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
 
 
 class MathGenerationHandler(BaseHTTPRequestHandler):
@@ -169,9 +184,11 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
 
         try:
             payload = self._read_json_body()
+            include_trace = _payload_trace_enabled(payload)
             request = GenerateRequest.from_dict(payload)
-            service = self.service or build_service()
+            service = self.service or build_service(capture_trace=include_trace)
             result = service.generate_verified(request)
+            self._attach_trace(result, service, include_trace)
         except ContractError as exc:
             self._send_contract_error(request_id, exc)
             return
@@ -201,9 +218,13 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
 
         try:
             payload = self._read_json_body()
+            include_trace = _payload_trace_enabled(payload)
             request = VisualGenerateRequest.from_dict(payload)
-            service = self.visual_service or build_visual_service()
+            service = self.visual_service or build_visual_service(
+                capture_trace=include_trace
+            )
             result = service.generate_visual(request)
+            self._attach_trace(result, service, include_trace)
         except ContractError as exc:
             self._send_contract_error(request_id, exc)
             return
@@ -292,6 +313,15 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
                 "request_id": request_id,
             },
         )
+
+    def _attach_trace(
+        self,
+        result: dict[str, Any],
+        service: MathGenerationService | VisualGenerationService,
+        include_trace: bool,
+    ) -> None:
+        if include_trace and hasattr(service, "tracer"):
+            result["trace"] = service.tracer.to_response()
 
     def log_message(self, format: str, *args: Any) -> None:
         return

@@ -160,9 +160,12 @@ OpenCode Go models currently handled as Anthropic-compatible `/messages`:
 
 For visual generation, the API first asks a visual instruction agent whether a
 diagram, graph, chemical structure, or explanatory figure is needed for the
-completed problem and solution. If needed, it sends that final natural-language
-prompt to OpenAI's Image API using `OPENAI_IMAGE_MODEL`, then validates the PNG
-with `qwen3.7-plus` through OpenCode Go.
+completed problem and solution. It can request multiple separate visuals for one
+problem. If visuals are needed, it sends each final natural-language prompt to
+OpenAI's Image API using `OPENAI_IMAGE_MODEL`, then validates each PNG with
+`qwen3.7-plus` through OpenCode Go. When validation requires repair, the API uses
+OpenAI image editing with the previous PNG as input instead of regenerating the
+figure from scratch.
 
 Use `qwen3.7-plus` as the default image-recognition validator model:
 
@@ -272,7 +275,7 @@ curl -X POST http://127.0.0.1:8000/visuals/generate \
   -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics","problem":"問題文...","solution":"解答..."}'
 ```
 
-If a visual is needed, the response includes one PNG asset as base64:
+If visuals are needed, the response includes one or more PNG assets as base64:
 
 ```json
 {
@@ -283,6 +286,7 @@ If a visual is needed, the response includes one PNG asset as base64:
     {
       "mime_type": "image/png",
       "base64": "...",
+      "id": "visual_1",
       "placement": "problem",
       "purpose": "diagram",
       "prompt": "..."

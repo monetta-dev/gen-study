@@ -10,6 +10,7 @@ from .models import (
     ContractError,
     VisualGenerateRequest,
     VisualInstruction,
+    VisualInstructionSet,
     VisualValidationResult,
 )
 
@@ -23,19 +24,23 @@ class ImageClient(Protocol):
     def generate_png_base64(self, prompt: str) -> str:
         """Generate one PNG image and return base64 content."""
 
+    def edit_png_base64(self, image_base64: str, prompt: str) -> str:
+        """Repair an existing PNG image and return base64 content."""
+
 
 def visual_instruction_system_prompt() -> str:
     return """You are VisualInstructionAgent, an academic visual editor.
 Read the completed Japanese entrance-exam problem and solution.
 Decide whether a diagram, graph, chemical structure, table-like figure, or other visual asset is useful.
-If a visual is needed, write the exact final prompt to send to an image generation model.
+If visuals are needed, write one exact final prompt for each image generation model call.
 The prompt must be detailed enough to generate a precise Japanese university entrance exam style figure.
 Prefer monochrome, clean line drawings for physics and mathematics unless the content clearly requires otherwise.
 For chemistry, preserve formulas, labels, and experimental details exactly.
+Create multiple visual items when the problem or solution naturally needs multiple separate diagrams, graphs, chemical structures, or explanatory figures.
 Do not create copyrighted textbook-style references or mention existing books.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
-{"needed":true|false,"placement":"problem|solution|explanation|none","purpose":"diagram|graph|chemical_structure|other|none","prompt":"...","must_include":["..."],"must_not_include":["..."]}"""
+{"needed":true|false,"visuals":[{"id":"visual_1","placement":"problem|solution|explanation","purpose":"diagram|graph|chemical_structure|other","prompt":"...","must_include":["..."],"must_not_include":["..."]}]}"""
 
 
 def visual_validator_system_prompt() -> str:
@@ -52,10 +57,11 @@ Return exactly this JSON shape:
 
 
 def visual_repair_system_prompt() -> str:
-    return """You are VisualRepairAgent, an academic image prompt reviser.
-Rewrite the image prompt to fix only the validator-confirmed visual issues.
+    return """You are VisualRepairAgent, an academic image edit prompt reviser.
+Write an image edit prompt to repair the previous generated image.
+Fix only the validator-confirmed visual issues.
 Preserve the original problem, solution, placement, purpose, and all correct constraints.
-Make the new prompt more explicit and less ambiguous.
+Make the edit prompt explicit about what should remain unchanged and what should be corrected.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {"prompt":"..."}"""
@@ -68,7 +74,7 @@ class VisualInstructionAgent:
         self.client = client
         self.tracer = tracer or InteractionTracer()
 
-    def create_instruction(self, request: VisualGenerateRequest) -> VisualInstruction:
+    def create_instruction(self, request: VisualGenerateRequest) -> VisualInstructionSet:
         messages: list[dict[str, object]] = [
             {"role": "system", "content": visual_instruction_system_prompt()},
             {
@@ -91,11 +97,12 @@ class VisualInstructionAgent:
             self.client,
             self.tracer,
             messages,
-            VisualInstruction.from_dict,
+            VisualInstructionSet.from_dict,
             (
-                '{"needed":true,"placement":"problem|solution|explanation|none",'
-                '"purpose":"diagram|graph|chemical_structure|other|none",'
-                '"prompt":"...","must_include":[],"must_not_include":[]}'
+                '{"needed":true,"visuals":[{"id":"visual_1",'
+                '"placement":"problem|solution|explanation",'
+                '"purpose":"diagram|graph|chemical_structure|other",'
+                '"prompt":"...","must_include":[],"must_not_include":[]}]}'
             ),
         )
 
@@ -207,6 +214,7 @@ class VisualRepairAgent:
         )
         return VisualInstruction(
             needed=instruction.needed,
+            visual_id=instruction.visual_id,
             placement=instruction.placement,
             purpose=instruction.purpose,
             prompt=result,
@@ -235,22 +243,59 @@ class VisualGenerationService:
         self.tracer = tracer or InteractionTracer()
 
     def generate_visual(self, request: VisualGenerateRequest) -> dict[str, object]:
-        instruction = self.instruction_agent.create_instruction(request)
-        if not instruction.needed:
+        instruction_set = self.instruction_agent.create_instruction(request)
+        if not instruction_set.needed:
             return {
                 "status": "success",
                 "visual_needed": False,
                 "visual_assets": [],
-                "instruction": instruction.to_dict(),
+                "instructions": instruction_set.to_dict(),
             }
 
+        visual_assets: list[dict[str, object]] = []
+        attempts: list[dict[str, object]] = []
+        validations: list[dict[str, object]] = []
+        validation_statuses: list[str] = []
+        for instruction in instruction_set.visuals:
+            result = self._generate_one_visual(request, instruction)
+            attempts.extend(result["attempts"])
+            validations.append(result["validation"])
+            visual_assets.append(result["asset"])
+            validation_statuses.append(str(result["validation_status"]))
+            if result["status"] == "failed":
+                return {
+                    "status": "failed",
+                    "reason": "visual_validator_rejected",
+                    "visual_needed": True,
+                    "visual_assets": visual_assets,
+                    "instructions": instruction_set.to_dict(),
+                    "validations": validations,
+                    "attempts": attempts,
+                }
+
+        return {
+            "status": "success",
+            "visual_needed": True,
+            "visual_validation_status": _aggregate_status(validation_statuses),
+            "visual_assets": visual_assets,
+            "instructions": instruction_set.to_dict(),
+            "validations": validations,
+            "attempts": attempts,
+        }
+
+    def _generate_one_visual(
+        self, request: VisualGenerateRequest, instruction: VisualInstruction
+    ) -> dict[str, object]:
+        image_base64 = self.image_client.generate_png_base64(instruction.prompt)
         attempts: list[dict[str, object]] = []
         repair_count = 0
+        action = "generate"
         while True:
-            image_base64 = self.image_client.generate_png_base64(instruction.prompt)
             validation = self.validator.validate(request, instruction, image_base64)
             attempts.append(
                 {
+                    "visual_id": instruction.visual_id,
+                    "action": action,
                     "prompt": instruction.prompt,
                     "validation": validation.to_dict(),
                 }
@@ -259,45 +304,29 @@ class VisualGenerationService:
             if validation.status in {"pass", "uncertain"}:
                 return {
                     "status": "success",
-                    "visual_needed": True,
-                    "visual_validation_status": validation.status,
-                    "visual_assets": [
-                        {
-                            "mime_type": "image/png",
-                            "base64": image_base64,
-                            "placement": instruction.placement,
-                            "purpose": instruction.purpose,
-                            "prompt": instruction.prompt,
-                        }
-                    ],
-                    "instruction": instruction.to_dict(),
+                    "asset": _visual_asset(instruction, image_base64),
                     "validation": validation.to_dict(),
                     "attempts": attempts,
+                    "validation_status": validation.status,
                 }
 
             if repair_count >= self.max_repair_attempts:
                 return {
                     "status": "failed",
-                    "reason": "visual_validator_rejected",
-                    "visual_needed": True,
-                    "visual_assets": [
-                        {
-                            "mime_type": "image/png",
-                            "base64": image_base64,
-                            "placement": instruction.placement,
-                            "purpose": instruction.purpose,
-                            "prompt": instruction.prompt,
-                        }
-                    ],
-                    "instruction": instruction.to_dict(),
+                    "asset": _visual_asset(instruction, image_base64),
                     "validation": validation.to_dict(),
                     "attempts": attempts,
+                    "validation_status": validation.status,
                 }
 
             instruction = self.repair_agent.repair_prompt(
                 request, instruction, validation
             )
+            image_base64 = self.image_client.edit_png_base64(
+                image_base64, instruction.prompt
+            )
             repair_count += 1
+            action = "edit"
 
 
 def _repaired_prompt_from_dict(data: dict[str, object]) -> str:
@@ -305,3 +334,22 @@ def _repaired_prompt_from_dict(data: dict[str, object]) -> str:
     if not isinstance(prompt, str) or not prompt.strip():
         raise ContractError("`prompt` must be a non-empty string")
     return prompt.strip()
+
+
+def _visual_asset(
+    instruction: VisualInstruction, image_base64: str
+) -> dict[str, object]:
+    return {
+        "id": instruction.visual_id,
+        "mime_type": "image/png",
+        "base64": image_base64,
+        "placement": instruction.placement,
+        "purpose": instruction.purpose,
+        "prompt": instruction.prompt,
+    }
+
+
+def _aggregate_status(statuses: list[str]) -> str:
+    if any(status == "uncertain" for status in statuses):
+        return "uncertain"
+    return "pass"

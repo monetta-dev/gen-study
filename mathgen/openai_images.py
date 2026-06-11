@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
+import uuid
 import urllib.error
 import urllib.request
 from typing import Any
@@ -72,14 +74,7 @@ class OpenAIImageClient:
         if not prompt.strip():
             raise ImageGenerationError("image prompt must be non-empty")
 
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-        }
-        if self.size:
-            payload["size"] = self.size
-        if self.quality:
-            payload["quality"] = self.quality
+        payload: dict[str, str | int] = self._image_fields(prompt)
         if self.n:
             payload["n"] = self.n
         data = json.dumps(payload).encode("utf-8")
@@ -95,16 +90,54 @@ class OpenAIImageClient:
         )
         response_body = self._open_with_retries(request)
 
+        return self._image_base64_from_response(response_body)
+
+    def edit_png_base64(self, image_base64: str, prompt: str) -> str:
+        if not self.api_key:
+            raise ImageGenerationError("OPENAI_API_KEY is not configured")
+        if not prompt.strip():
+            raise ImageGenerationError("image edit prompt must be non-empty")
         try:
-            decoded: dict[str, Any] = json.loads(response_body)
-            image_base64 = decoded["data"][0]["b64_json"]
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-            raise ImageGenerationError(
-                "OpenAI Image API response did not include data[0].b64_json"
-            ) from exc
-        if not isinstance(image_base64, str) or not image_base64.strip():
-            raise ImageGenerationError("OpenAI Image API returned an empty image")
-        return image_base64.strip()
+            image_bytes = base64.b64decode(image_base64, validate=True)
+        except ValueError as exc:
+            raise ImageGenerationError("image_base64 must be valid base64") from exc
+
+        body, content_type = self._multipart_body(
+            fields=self._image_fields(prompt),
+            files=[
+                {
+                    "field": "image",
+                    "filename": "image.png",
+                    "content_type": "image/png",
+                    "data": image_bytes,
+                }
+            ],
+        )
+        request = urllib.request.Request(
+            f"{self.base_url}/images/edits",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": content_type,
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        response_body = self._open_with_retries(request)
+        return self._image_base64_from_response(response_body)
+
+    def _image_fields(self, prompt: str) -> dict[str, str]:
+        fields = {
+            "model": self.model,
+            "prompt": prompt,
+        }
+        if self.size:
+            fields["size"] = self.size
+        if self.quality:
+            fields["quality"] = self.quality
+        if self.n:
+            fields["n"] = str(self.n)
+        return fields
 
     def _open_with_retries(self, request: urllib.request.Request) -> str:
         for attempt in range(self.retry_attempts + 1):
@@ -130,6 +163,54 @@ class OpenAIImageClient:
             except (TimeoutError, OSError) as exc:
                 raise ImageGenerationError(f"OpenAI Image API connection failed: {exc}") from exc
         raise ImageGenerationError("OpenAI Image API request failed")
+
+    def _image_base64_from_response(self, response_body: str) -> str:
+        try:
+            decoded: dict[str, Any] = json.loads(response_body)
+            image_base64 = decoded["data"][0]["b64_json"]
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            raise ImageGenerationError(
+                "OpenAI Image API response did not include data[0].b64_json"
+            ) from exc
+        if not isinstance(image_base64, str) or not image_base64.strip():
+            raise ImageGenerationError("OpenAI Image API returned an empty image")
+        return image_base64.strip()
+
+    def _multipart_body(
+        self, fields: dict[str, str], files: list[dict[str, object]]
+    ) -> tuple[bytes, str]:
+        boundary = f"gen-study-{uuid.uuid4().hex}"
+        chunks: list[bytes] = []
+        for name, value in fields.items():
+            chunks.extend(
+                [
+                    f"--{boundary}\r\n".encode("utf-8"),
+                    f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),
+                    value.encode("utf-8"),
+                    b"\r\n",
+                ]
+            )
+        for file in files:
+            field = str(file["field"])
+            filename = str(file["filename"])
+            content_type = str(file["content_type"])
+            data = file["data"]
+            if not isinstance(data, bytes):
+                raise ImageGenerationError("multipart file data must be bytes")
+            chunks.extend(
+                [
+                    f"--{boundary}\r\n".encode("utf-8"),
+                    (
+                        f'Content-Disposition: form-data; name="{field}"; '
+                        f'filename="{filename}"\r\n'
+                    ).encode("utf-8"),
+                    f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
+                    data,
+                    b"\r\n",
+                ]
+            )
+        chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
+        return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
     def _is_retryable_http_error(self, code: int, body: str) -> bool:
         if code in {408, 409, 425, 429, 500, 502, 503, 504, 520, 524}:

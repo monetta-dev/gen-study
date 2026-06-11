@@ -38,6 +38,8 @@ select {
 
 .request-panel,
 .output-section,
+.visual-section,
+.process-section,
 .raw-panel {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -132,7 +134,27 @@ select:focus {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
+}
+
+.visual-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  margin-right: auto;
+}
+
+.visual-toggle input {
+  width: auto;
+  min-height: auto;
+}
+
+.visual-toggle span {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 button {
@@ -223,6 +245,115 @@ button:disabled {
   color: var(--muted);
 }
 
+.visual-section {
+  padding: 18px;
+}
+
+.visual-output {
+  min-height: 140px;
+}
+
+.visual-status {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--accent-dark);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.visual-status.uncertain {
+  color: #8a5a00;
+}
+
+.visual-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.visual-figure {
+  margin: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 12px;
+}
+
+.visual-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #ffffff;
+  border: 1px solid var(--line);
+}
+
+.visual-figure figcaption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.prompt-details {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.prompt-details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.prompt-details p {
+  margin-top: 6px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.process-section {
+  padding: 18px;
+}
+
+.process-output {
+  min-height: 120px;
+}
+
+.process-group {
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 10px;
+}
+
+.process-group + .process-group {
+  margin-top: 12px;
+}
+
+.process-group > summary,
+.process-item > summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.process-item {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.process-item pre {
+  max-height: 360px;
+  overflow: auto;
+  margin: 8px 0 0;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  padding: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .raw-panel {
   padding: 14px 18px;
 }
@@ -260,5 +391,9 @@ button:disabled {
 
   button {
     flex: 1 1 140px;
+  }
+
+  .visual-toggle {
+    flex: 1 1 100%;
   }
 }

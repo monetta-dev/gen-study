@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import base64
 import urllib.error
 import unittest
 from unittest.mock import patch
@@ -92,6 +93,31 @@ class OpenAIImageClientTests(unittest.TestCase):
         self.assertEqual(captured["payload"]["size"], "1024x1024")
         self.assertEqual(captured["payload"]["quality"], "high")
         self.assertEqual(captured["payload"]["n"], 1)
+
+    def test_edits_image_with_multipart_payload(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["headers"] = dict(request.header_items())
+            captured["body"] = request.data
+            return FakeImageResponse()
+
+        client = OpenAIImageClient(api_key="openai-key")
+        image_base64 = base64.b64encode(b"png-bytes").decode("ascii")
+
+        with patch("urllib.request.urlopen", fake_urlopen):
+            edited_base64 = client.edit_png_base64(image_base64, "Repair the rod.")
+
+        self.assertEqual(edited_base64, "png-base64")
+        self.assertEqual(captured["url"], "https://api.openai.com/v1/images/edits")
+        self.assertIn("multipart/form-data", captured["headers"]["Content-type"])
+        self.assertIn(b'name="model"', captured["body"])
+        self.assertIn(b"gpt-image-2", captured["body"])
+        self.assertIn(b'name="prompt"', captured["body"])
+        self.assertIn(b"Repair the rod.", captured["body"])
+        self.assertIn(b'name="image"; filename="image.png"', captured["body"])
+        self.assertIn(b"png-bytes", captured["body"])
 
     def test_missing_api_key_is_clear(self):
         client = OpenAIImageClient()

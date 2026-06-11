@@ -1,3 +1,4 @@
 window.GEN_STUDY_CONFIG = {
-  apiUrl: ""
+  apiUrl: "",
+  visualApiUrl: ""
 };

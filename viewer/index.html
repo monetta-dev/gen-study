@@ -76,6 +76,10 @@
                 <input id="apiUrlInput" name="apiUrl" type="url">
               </label>
               <label class="wide-field">
+                <span>Visual API URL</span>
+                <input id="visualApiUrlInput" name="visualApiUrl" type="url">
+              </label>
+              <label class="wide-field">
                 <span>API Key</span>
                 <input id="apiKeyInput" name="apiKey" type="password" autocomplete="off">
               </label>
@@ -83,7 +87,12 @@
           </details>
 
           <div class="actions">
+            <label class="visual-toggle">
+              <input id="autoVisualInput" name="autoVisual" type="checkbox">
+              <span>Generate visuals</span>
+            </label>
             <button id="sampleButton" type="button">Load Sample</button>
+            <button id="visualButton" type="button" disabled>Generate Visuals</button>
             <button id="generateButton" type="submit">Generate</button>
           </div>
         </form>
@@ -101,6 +110,16 @@
           <div class="section-label">Solution</div>
           <div id="solutionOutput" class="rendered-text empty">No solution loaded.</div>
         </article>
+      </section>
+
+      <section class="visual-section" aria-label="Generated visuals">
+        <div class="section-label">Visuals</div>
+        <div id="visualOutput" class="visual-output empty">No visuals loaded.</div>
+      </section>
+
+      <section class="process-section" aria-label="Generation process">
+        <div class="section-label">Process</div>
+        <div id="processOutput" class="process-output empty">No process loaded.</div>
       </section>
 
       <details class="raw-panel">

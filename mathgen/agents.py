@@ -33,12 +33,19 @@ class TraceWriter(Protocol):
 
 
 class InteractionTracer:
-    def __init__(self, enabled: bool = False, writer: TraceWriter | None = None) -> None:
+    def __init__(
+        self,
+        enabled: bool = False,
+        writer: TraceWriter | None = None,
+        capture: bool = False,
+    ) -> None:
         self.enabled = enabled
         self.writer = writer or sys.stdout
+        self.capture = capture
+        self.records: list[str] = []
 
     def log_request(self, agent_name: str, messages: list[dict[str, Any]]) -> None:
-        if not self.enabled:
+        if not self.enabled and not self.capture:
             return
         self._write(f"\n--- {agent_name} request ---")
         for index, message in enumerate(messages, start=1):
@@ -53,7 +60,7 @@ class InteractionTracer:
             self._write(f"[{index}] role={role}\n{content}")
 
     def log_response(self, agent_name: str, content: str) -> None:
-        if not self.enabled:
+        if not self.enabled and not self.capture:
             return
         self._write(f"--- {agent_name} response ---\n{content}")
 
@@ -64,7 +71,7 @@ class InteractionTracer:
         issues: tuple[str, ...],
         extra: str,
     ) -> None:
-        if not self.enabled:
+        if not self.enabled and not self.capture:
             return
         self._write(
             f"--- {validator_name} decision ---\n"
@@ -72,7 +79,7 @@ class InteractionTracer:
         )
 
     def log_adjudication_result(self, result: AdjudicationResult) -> None:
-        if not self.enabled:
+        if not self.enabled and not self.capture:
             return
         self._write(
             "--- Adjudicator decision ---\n"
@@ -81,7 +88,7 @@ class InteractionTracer:
         )
 
     def log_attempt(self, attempt: int, request: GenerateRequest) -> None:
-        if not self.enabled:
+        if not self.enabled and not self.capture:
             return
         self._write(
             "\n=== Initial generation "
@@ -91,7 +98,7 @@ class InteractionTracer:
     def log_repair_attempt(
         self, attempt: int, validation_stage: str, issues: tuple[str, ...]
     ) -> None:
-        if not self.enabled:
+        if not self.enabled and not self.capture:
             return
         self._write(
             "\n=== Repair attempt "
@@ -99,13 +106,19 @@ class InteractionTracer:
         )
 
     def log_final_result(self, result: dict[str, object]) -> None:
-        if not self.enabled:
+        if not self.enabled and not self.capture:
             return
         self._write(f"=== Final result: status={result.get('status')} ===\n")
 
+    def to_response(self) -> list[str]:
+        return list(self.records)
+
     def _write(self, text: str) -> None:
-        self.writer.write(f"{text}\n")
-        self.writer.flush()
+        if self.capture:
+            self.records.append(text)
+        if self.enabled:
+            self.writer.write(f"{text}\n")
+            self.writer.flush()
 
 
 T = TypeVar("T")

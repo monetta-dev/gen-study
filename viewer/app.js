@@ -10,13 +10,20 @@ const subjectInput = document.getElementById("subjectInput");
 const levelInput = document.getElementById("levelInput");
 const topicInput = document.getElementById("topicInput");
 const apiUrlInput = document.getElementById("apiUrlInput");
+const visualApiUrlInput = document.getElementById("visualApiUrlInput");
 const apiKeyInput = document.getElementById("apiKeyInput");
+const autoVisualInput = document.getElementById("autoVisualInput");
 const sampleButton = document.getElementById("sampleButton");
+const visualButton = document.getElementById("visualButton");
 const generateButton = document.getElementById("generateButton");
 const statusMessage = document.getElementById("statusMessage");
 const problemOutput = document.getElementById("problemOutput");
 const solutionOutput = document.getElementById("solutionOutput");
+const visualOutput = document.getElementById("visualOutput");
+const processOutput = document.getElementById("processOutput");
 const rawOutput = document.getElementById("rawOutput");
+let currentTextResponse = null;
+let currentVisualResponse = null;
 
 const defaultTopicsBySubject = {
   mathematics: "Probability Recurrence Relations",
@@ -56,6 +63,21 @@ function defaultApiUrl() {
   return "http://127.0.0.1:8000/generate";
 }
 
+function defaultVisualApiUrl() {
+  const configuredApiUrl = window.GEN_STUDY_CONFIG && window.GEN_STUDY_CONFIG.visualApiUrl;
+  if (configuredApiUrl) {
+    return configuredApiUrl;
+  }
+  const apiUrl = defaultApiUrl();
+  if (apiUrl.endsWith("/generate")) {
+    return `${apiUrl.slice(0, -"/generate".length)}/visuals/generate`;
+  }
+  if (window.location.protocol === "http:" || window.location.protocol === "https:") {
+    return `${window.location.origin}/visuals/generate`;
+  }
+  return "http://127.0.0.1:8000/visuals/generate";
+}
+
 function setTopicOptions(subject) {
   const topicOptions = document.getElementById("topicOptions");
   clearNode(topicOptions);
@@ -85,7 +107,16 @@ function setStatus(message, type = "") {
 
 function setLoading(isLoading) {
   generateButton.disabled = isLoading;
+  visualButton.disabled = isLoading || !currentTextResponse;
+  sampleButton.disabled = isLoading;
   generateButton.textContent = isLoading ? "Generating..." : "Generate";
+}
+
+function setVisualLoading(isLoading) {
+  generateButton.disabled = isLoading;
+  sampleButton.disabled = isLoading;
+  visualButton.disabled = isLoading || !currentTextResponse;
+  visualButton.textContent = isLoading ? "Generating Visuals..." : "Generate Visuals";
 }
 
 function clearNode(node) {
@@ -197,6 +228,127 @@ function appendRichText(container, value) {
   });
 }
 
+function resetVisualOutput(message = "No visuals loaded.") {
+  clearNode(visualOutput);
+  visualOutput.textContent = message;
+  visualOutput.classList.add("empty");
+  currentVisualResponse = null;
+}
+
+function resetProcessOutput(message = "No process loaded.") {
+  clearNode(processOutput);
+  processOutput.textContent = message;
+  processOutput.classList.add("empty");
+}
+
+function renderTraceRecords(records, title, append = true) {
+  if (!append) {
+    clearNode(processOutput);
+  }
+  if (!Array.isArray(records) || records.length === 0) {
+    if (!append || processOutput.classList.contains("empty")) {
+      processOutput.textContent = "No process trace was returned.";
+      processOutput.classList.add("empty");
+    }
+    return;
+  }
+
+  if (processOutput.classList.contains("empty")) {
+    clearNode(processOutput);
+    processOutput.classList.remove("empty");
+  }
+
+  const group = document.createElement("details");
+  group.className = "process-group";
+  group.open = true;
+  const summary = document.createElement("summary");
+  summary.textContent = title;
+  group.appendChild(summary);
+
+  records.forEach((record, index) => {
+    const item = document.createElement("details");
+    item.className = "process-item";
+    const itemSummary = document.createElement("summary");
+    itemSummary.textContent = traceTitle(record, index + 1);
+    const body = document.createElement("pre");
+    body.textContent = record;
+    item.appendChild(itemSummary);
+    item.appendChild(body);
+    group.appendChild(item);
+  });
+
+  processOutput.appendChild(group);
+}
+
+function traceTitle(record, index) {
+  const firstLine = String(record || "").trim().split("\n")[0];
+  return firstLine.replace(/^[-=\s]+|[-=\s]+$/g, "") || `Step ${index}`;
+}
+
+function renderVisualResponse(data) {
+  currentVisualResponse = data;
+  clearNode(visualOutput);
+  visualOutput.classList.remove("empty");
+
+  if (data.status !== "success") {
+    visualOutput.textContent = data.detail || data.reason || data.error || "Visual generation failed.";
+    visualOutput.classList.add("empty");
+    return;
+  }
+
+  if (!data.visual_needed) {
+    visualOutput.textContent = "No visual was needed for this problem.";
+    visualOutput.classList.add("empty");
+    return;
+  }
+
+  const assets = Array.isArray(data.visual_assets) ? data.visual_assets : [];
+  if (assets.length === 0) {
+    visualOutput.textContent = "No visual asset was returned.";
+    visualOutput.classList.add("empty");
+    return;
+  }
+
+  const status = document.createElement("div");
+  status.className = `visual-status ${data.visual_validation_status || ""}`.trim();
+  status.textContent = `Validation: ${data.visual_validation_status || "unknown"}`;
+  visualOutput.appendChild(status);
+
+  const grid = document.createElement("div");
+  grid.className = "visual-grid";
+  assets.forEach((asset, index) => {
+    const figure = document.createElement("figure");
+    figure.className = "visual-figure";
+
+    const image = document.createElement("img");
+    image.alt = `${asset.purpose || "visual"} ${asset.id || index + 1}`;
+    image.src = `data:${asset.mime_type || "image/png"};base64,${asset.base64 || ""}`;
+    figure.appendChild(image);
+
+    const caption = document.createElement("figcaption");
+    const title = document.createElement("strong");
+    title.textContent = asset.id || `visual_${index + 1}`;
+    caption.appendChild(title);
+    caption.appendChild(document.createTextNode(` · ${asset.placement || "unknown"} · ${asset.purpose || "visual"}`));
+    figure.appendChild(caption);
+
+    if (asset.prompt) {
+      const details = document.createElement("details");
+      details.className = "prompt-details";
+      const summary = document.createElement("summary");
+      summary.textContent = "Prompt";
+      const prompt = document.createElement("p");
+      prompt.textContent = asset.prompt;
+      details.appendChild(summary);
+      details.appendChild(prompt);
+      figure.appendChild(details);
+    }
+
+    grid.appendChild(figure);
+  });
+  visualOutput.appendChild(grid);
+}
+
 async function typeset() {
   if (window.MathJax && window.MathJax.typesetPromise) {
     await window.MathJax.typesetPromise([problemOutput, solutionOutput]);
@@ -204,13 +356,18 @@ async function typeset() {
 }
 
 async function renderResponse(data) {
-  rawOutput.textContent = JSON.stringify(data, null, 2);
+  rawOutput.textContent = JSON.stringify({ text: data, visual: currentVisualResponse }, null, 2);
 
   if (data.status === "success") {
+    currentTextResponse = data;
     appendRichText(problemOutput, data.problem);
     appendRichText(solutionOutput, data.solution);
+    renderTraceRecords(data.trace, "Problem Generation", false);
+    visualButton.disabled = false;
     setStatus("Generation completed.", "ok");
   } else {
+    currentTextResponse = null;
+    visualButton.disabled = true;
     const detail = data.detail || data.reason || data.error || "Generation failed.";
     appendRichText(problemOutput, data.problem);
     appendRichText(solutionOutput, data.solution);
@@ -228,7 +385,8 @@ function requestPayload() {
   return {
     subject: subjectInput.value,
     level: levelInput.value.trim(),
-    topic: topicInput.value.trim()
+    topic: topicInput.value.trim(),
+    trace: true
   };
 }
 
@@ -251,6 +409,8 @@ async function generateProblem(event) {
 
   setLoading(true);
   setStatus("Generating. This can take several minutes.", "");
+  resetVisualOutput();
+  resetProcessOutput("Generating...");
 
   try {
     const response = await fetch(apiUrlInput.value.trim(), {
@@ -270,6 +430,9 @@ async function generateProblem(event) {
       return;
     }
     await renderResponse(data);
+    if (data.status === "success" && autoVisualInput.checked) {
+      await generateVisuals();
+    }
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
@@ -277,13 +440,83 @@ async function generateProblem(event) {
   }
 }
 
+function visualPayload() {
+  if (!currentTextResponse) {
+    return null;
+  }
+  return {
+    subject: subjectInput.value,
+    level: levelInput.value.trim(),
+    topic: topicInput.value.trim(),
+    problem: currentTextResponse.problem,
+    solution: currentTextResponse.solution,
+    trace: true
+  };
+}
+
+async function generateVisuals() {
+  const payload = visualPayload();
+  if (!payload) {
+    setStatus("Generate a problem before generating visuals.", "error");
+    return;
+  }
+
+  const headers = {
+    "Content-Type": "application/json"
+  };
+  const apiKey = apiKeyInput.value.trim();
+  if (apiKey) {
+    headers["X-API-Key"] = apiKey;
+  }
+
+  setVisualLoading(true);
+  setStatus("Generating visuals. This can take several minutes.", "");
+  resetVisualOutput("Generating visuals...");
+
+  try {
+    const response = await fetch(visualApiUrlInput.value.trim(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (error) {
+      throw new Error(`Visual API returned non-JSON response: ${text.slice(0, 160)}`);
+    }
+    renderVisualResponse(data);
+    renderTraceRecords(data.trace, "Visual Generation", true);
+    rawOutput.textContent = JSON.stringify({ text: currentTextResponse, visual: data }, null, 2);
+    if (!response.ok && data.status !== "failed") {
+      setStatus(data.detail || data.error || "Visual generation failed.", "error");
+      return;
+    }
+    if (data.status === "success") {
+      setStatus("Visual generation completed.", "ok");
+    } else {
+      setStatus(data.detail || data.reason || data.error || "Visual generation failed.", "error");
+    }
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    setVisualLoading(false);
+  }
+}
+
 function loadSample() {
+  currentTextResponse = sampleResponse;
+  resetVisualOutput();
+  resetProcessOutput();
   renderResponse(sampleResponse);
 }
 
 apiUrlInput.value = defaultApiUrl();
+visualApiUrlInput.value = defaultVisualApiUrl();
 initializeRequestDefaults();
 form.addEventListener("submit", generateProblem);
 subjectInput.addEventListener("change", syncTopicForSubject);
 sampleButton.addEventListener("click", loadSample);
+visualButton.addEventListener("click", generateVisuals);
 loadSample();

@@ -90,6 +90,7 @@ class VisualGenerateRequest:
 @dataclass(frozen=True)
 class VisualInstruction:
     needed: bool
+    visual_id: str
     placement: str
     purpose: str
     prompt: str
@@ -106,8 +107,10 @@ class VisualInstruction:
         prompt = _optional_string(data, "prompt")
         if needed and not prompt:
             raise ContractError("`prompt` must be a non-empty string when `needed` is true")
+        visual_id = _optional_string(data, "id") or _optional_string(data, "visual_id")
         return cls(
             needed=needed,
+            visual_id=visual_id,
             placement=placement,
             purpose=purpose,
             prompt=prompt,
@@ -118,12 +121,73 @@ class VisualInstruction:
     def to_dict(self) -> dict[str, Any]:
         return {
             "needed": self.needed,
+            "id": self.visual_id,
             "placement": self.placement,
             "purpose": self.purpose,
             "prompt": self.prompt,
             "must_include": list(self.must_include),
             "must_not_include": list(self.must_not_include),
         }
+
+
+@dataclass(frozen=True)
+class VisualInstructionSet:
+    needed: bool
+    visuals: tuple[VisualInstruction, ...]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "VisualInstructionSet":
+        if "visuals" not in data:
+            instruction = VisualInstruction.from_dict(data)
+            return cls(
+                needed=instruction.needed,
+                visuals=(_with_default_visual_id(instruction, 1),)
+                if instruction.needed
+                else (),
+            )
+
+        needed = data.get("needed")
+        if not isinstance(needed, bool):
+            raise ContractError("`needed` must be a boolean")
+        raw_visuals = data.get("visuals", [])
+        if not isinstance(raw_visuals, list):
+            raise ContractError("`visuals` must be an array")
+        visuals = tuple(
+            _with_default_visual_id(VisualInstruction.from_dict(_visual_item(item)), index)
+            for index, item in enumerate(raw_visuals, start=1)
+            if isinstance(item, dict)
+        )
+        if needed and not visuals:
+            raise ContractError("`visuals` must contain at least one item when `needed` is true")
+        return cls(needed=needed, visuals=visuals if needed else ())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "needed": self.needed,
+            "visuals": [visual.to_dict() for visual in self.visuals],
+        }
+
+
+def _with_default_visual_id(
+    instruction: VisualInstruction, index: int
+) -> VisualInstruction:
+    if instruction.visual_id:
+        return instruction
+    return VisualInstruction(
+        needed=instruction.needed,
+        visual_id=f"visual_{index}",
+        placement=instruction.placement,
+        purpose=instruction.purpose,
+        prompt=instruction.prompt,
+        must_include=instruction.must_include,
+        must_not_include=instruction.must_not_include,
+    )
+
+
+def _visual_item(data: dict[str, Any]) -> dict[str, Any]:
+    if "needed" in data:
+        return data
+    return {**data, "needed": True}
 
 
 @dataclass(frozen=True)

@@ -9,6 +9,7 @@ from mathgen.agents import (
     ComplianceValidatorAgent,
     CriticalValidatorAgent,
     GeneratorAgent,
+    InteractionTracer,
     MathGenerationService,
     RepairAgent,
 )
@@ -125,6 +126,37 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["problem"], "問 $x$")
+
+    def test_generate_endpoint_can_return_process_trace(self):
+        tracer = InteractionTracer(capture=True)
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient(['{"problem":"問","solution":"解"}']), tracer=tracer),
+            AdjudicatorAgent(FakeClient([]), tracer=tracer),
+            RepairAgent(FakeClient([]), tracer=tracer),
+            CriticalValidatorAgent(
+                FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}']),
+                tracer=tracer,
+            ),
+            ComplianceValidatorAgent(
+                FakeClient(['{"passed":true,"curriculum_compliant":true,"issues":[]}']),
+                tracer=tracer,
+            ),
+            tracer=tracer,
+        )
+        server = self.start_server(service)
+
+        status, payload = self.post_json(
+            server,
+            {
+                "level": "University of Tokyo",
+                "topic": "Probability Recurrence Relations",
+                "trace": True,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertIn("trace", payload)
+        self.assertTrue(any("Generator request" in record for record in payload["trace"]))
 
     def test_generate_endpoint_rejects_invalid_request(self):
         service = MathGenerationService(
@@ -319,6 +351,8 @@ class ApiTests(unittest.TestCase):
 
     def test_visuals_generate_endpoint_returns_visual_asset(self):
         class FakeVisualService:
+            tracer = type("FakeTracer", (), {"to_response": lambda self: ["visual trace"]})()
+
             def generate_visual(self, request):
                 return {
                     "status": "success",
@@ -355,6 +389,7 @@ class ApiTests(unittest.TestCase):
                 "topic": "Mechanics",
                 "problem": "問題文",
                 "solution": "解答",
+                "trace": True,
             },
             path="/visuals/generate",
         )
@@ -362,6 +397,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["visual_assets"][0]["base64"], "png-base64")
+        self.assertEqual(payload["trace"], ["visual trace"])
 
     def test_visuals_generate_endpoint_returns_image_generation_error(self):
         class FakeVisualService:
