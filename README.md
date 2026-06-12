@@ -19,6 +19,7 @@ containing `allow_visuals` or `allow_diagram` are rejected.
 - `OPENCODE_GO_API_KEY` in `.env.local` or the shell environment
 - Optional: `OPENCODE_GO_MODEL`, defaults to `qwen3.7-max`
 - Optional visual API setting: `VISUAL_TIKZ_MODEL`, defaults to `qwen3.7-max`
+- Optional visual API setting: `VISUAL_TIKZ_REPAIR_ATTEMPTS`, defaults to `2`
 - Optional: `OPENCODE_GO_BASE_URL`, defaults to `https://opencode.ai/zen/go/v1`
 - Optional: `OPENCODE_GO_API_STYLE`; normally omitted and inferred from the model
 - Optional: `OPENCODE_GO_TIMEOUT_SECONDS`, defaults to `300`
@@ -54,6 +55,7 @@ Then edit `.env.local` and set your actual API key:
 OPENCODE_GO_API_KEY=your_opencode_go_api_key_here
 OPENCODE_GO_MODEL=qwen3.7-max
 VISUAL_TIKZ_MODEL=qwen3.7-max
+VISUAL_TIKZ_REPAIR_ATTEMPTS=2
 OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
 OPENCODE_GO_API_STYLE=
 OPENCODE_GO_STREAM=true
@@ -158,11 +160,15 @@ problem. Visual assets are generated as TikZ source:
 
 ```dotenv
 VISUAL_TIKZ_MODEL=qwen3.7-max
+VISUAL_TIKZ_REPAIR_ATTEMPTS=2
 ```
 
-The visual API returns `tikz_source` only and does not compile LaTeX on the
-server. This keeps the main API fast and avoids a heavy TeX runtime dependency.
-The text-only `/generate` endpoint does not read this visual setting.
+Each TikZ source is checked by a source-level TikZ validator. If validation
+requires repair, the TikZ repair agent revises the same source and validation
+runs again until it passes or reaches `VISUAL_TIKZ_REPAIR_ATTEMPTS`. The visual
+API returns `tikz_source` only and does not compile LaTeX on the server. This
+keeps the main API fast and avoids a heavy TeX runtime dependency. The text-only
+`/generate` endpoint does not read this visual setting.
 
 OpenCode Go models currently handled as OpenAI-compatible `/chat/completions`:
 
@@ -250,6 +256,7 @@ If visuals are needed, the response includes one or more TikZ assets:
   "status": "success",
   "visual_backend": "tikz",
   "visual_needed": true,
+  "visual_validation_status": "pass",
   "visual_assets": [
     {
       "mime_type": "text/x-tex",

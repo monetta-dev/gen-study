@@ -168,6 +168,28 @@ class VisualInstructionSet:
         }
 
 
+@dataclass(frozen=True)
+class TikZValidationResult:
+    status: str
+    issues: tuple[str, ...]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TikZValidationResult":
+        status = data.get("status")
+        if status not in {"pass", "repair_required"}:
+            raise ContractError("`status` must be `pass` or `repair_required`")
+        issues = _string_list(data, "issues")
+        if status == "repair_required" and not issues:
+            raise ContractError("`issues` must be non-empty when repair is required")
+        return cls(status=status, issues=issues)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "issues": list(self.issues),
+        }
+
+
 def _with_default_visual_id(
     instruction: VisualInstruction, index: int
 ) -> VisualInstruction:

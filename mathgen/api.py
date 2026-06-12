@@ -32,6 +32,8 @@ from .models import (
 )
 from .visual_agents import (
     TikZGenerationAgent,
+    TikZRepairAgent,
+    TikZValidatorAgent,
     VisualGenerationService,
     VisualInstructionAgent,
 )
@@ -76,9 +78,14 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
         or "qwen3.7-max"
     )
     tikz_client = OpenCodeGoClient(model=tikz_model)
+    tikz_validator_client = OpenCodeGoClient(model=tikz_model)
+    tikz_repair_client = OpenCodeGoClient(model=tikz_model)
     return VisualGenerationService(
         instruction_agent=VisualInstructionAgent(instruction_client, tracer=tracer),
         tikz_agent=TikZGenerationAgent(tikz_client, tracer=tracer),
+        tikz_validator=TikZValidatorAgent(tikz_validator_client, tracer=tracer),
+        tikz_repair_agent=TikZRepairAgent(tikz_repair_client, tracer=tracer),
+        max_repair_attempts=_env_int("VISUAL_TIKZ_REPAIR_ATTEMPTS", 2),
         tracer=tracer,
     )
 
