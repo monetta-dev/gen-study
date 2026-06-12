@@ -1,12 +1,11 @@
 import json
 import unittest
 
-from mathgen.models import VisualGenerateRequest
+from mathgen.models import ModelOutputError, VisualGenerateRequest
 from mathgen.visual_agents import (
+    TikZGenerationAgent,
     VisualGenerationService,
     VisualInstructionAgent,
-    VisualRepairAgent,
-    VisualValidatorAgent,
 )
 
 
@@ -18,21 +17,6 @@ class FakeChatClient:
     def chat(self, messages):
         self.messages.append(messages)
         return self.responses.pop(0)
-
-
-class FakeImageClient:
-    def __init__(self, images):
-        self.images = list(images)
-        self.prompts = []
-        self.edits = []
-
-    def generate_png_base64(self, prompt):
-        self.prompts.append(prompt)
-        return self.images.pop(0)
-
-    def edit_png_base64(self, image_base64, prompt):
-        self.edits.append((image_base64, prompt))
-        return self.images.pop(0)
 
 
 class VisualGenerationServiceTests(unittest.TestCase):
@@ -48,25 +32,11 @@ class VisualGenerationServiceTests(unittest.TestCase):
         )
 
     def test_returns_no_asset_when_visual_not_needed(self):
-        instruction_client = FakeChatClient(
-            [
-                json.dumps(
-                    {
-                        "needed": False,
-                        "placement": "none",
-                        "purpose": "none",
-                        "prompt": "",
-                        "must_include": [],
-                        "must_not_include": [],
-                    }
-                )
-            ]
-        )
+        instruction_client = FakeChatClient([json.dumps({"needed": False})])
+        tikz_client = FakeChatClient([])
         service = VisualGenerationService(
             VisualInstructionAgent(instruction_client),
-            FakeImageClient([]),
-            VisualValidatorAgent(FakeChatClient([])),
-            VisualRepairAgent(FakeChatClient([])),
+            TikZGenerationAgent(tikz_client),
         )
 
         result = service.generate_visual(self.request())
@@ -74,53 +44,56 @@ class VisualGenerationServiceTests(unittest.TestCase):
         self.assertEqual(result["status"], "success")
         self.assertFalse(result["visual_needed"])
         self.assertEqual(result["visual_assets"], [])
+        self.assertEqual(tikz_client.messages, [])
 
-    def test_generates_and_validates_image(self):
+    def test_generates_tikz_asset(self):
         instruction_client = FakeChatClient(
             [
                 json.dumps(
                     {
                         "needed": True,
-                        "placement": "problem",
-                        "purpose": "diagram",
-                        "prompt": "Draw a cart and rod.",
-                        "must_include": ["cart", "rod"],
-                        "must_not_include": ["wheels"],
+                        "visuals": [
+                            {
+                                "id": "figure_1",
+                                "placement": "problem",
+                                "purpose": "diagram",
+                                "prompt": "Draw a cart setup as TikZ.",
+                                "must_include": ["cart"],
+                                "must_not_include": ["wheels"],
+                            }
+                        ],
                     }
                 )
             ]
         )
-        validator_client = FakeChatClient(
+        tikz_client = FakeChatClient(
             [
                 json.dumps(
                     {
-                        "status": "pass",
-                        "confidence": 0.93,
-                        "findings": [],
+                        "tikz_source": "\\begin{tikzpicture}\\draw (0,0)--(1,0);\\end{tikzpicture}"
                     }
                 )
             ]
         )
-        image_client = FakeImageClient(["png-base64"])
         service = VisualGenerationService(
             VisualInstructionAgent(instruction_client),
-            image_client,
-            VisualValidatorAgent(validator_client),
-            VisualRepairAgent(FakeChatClient([])),
+            TikZGenerationAgent(tikz_client),
         )
 
         result = service.generate_visual(self.request())
 
         self.assertEqual(result["status"], "success")
-        self.assertTrue(result["visual_needed"])
-        self.assertEqual(result["visual_validation_status"], "pass")
-        self.assertEqual(result["visual_assets"][0]["base64"], "png-base64")
-        self.assertEqual(result["visual_assets"][0]["id"], "visual_1")
-        self.assertEqual(image_client.prompts, ["Draw a cart and rod."])
-        validator_content = validator_client.messages[0][1]["content"]
-        self.assertEqual(validator_content[1]["source"]["data"], "png-base64")
+        self.assertEqual(result["visual_backend"], "tikz")
+        self.assertEqual(result["visual_validation_status"], "not_run")
+        self.assertEqual(result["visual_assets"][0]["id"], "figure_1")
+        self.assertEqual(result["visual_assets"][0]["mime_type"], "text/x-tex")
+        self.assertIn("\\begin{tikzpicture}", result["visual_assets"][0]["tikz_source"])
+        self.assertEqual(result["attempts"][0]["action"], "generate_tikz")
+        tikz_payload = json.loads(tikz_client.messages[0][1]["content"])
+        self.assertEqual(tikz_payload["visual_prompt"], "Draw a cart setup as TikZ.")
+        self.assertEqual(tikz_payload["must_not_include"], ["wheels"])
 
-    def test_generates_multiple_visuals(self):
+    def test_generates_multiple_tikz_assets(self):
         instruction_client = FakeChatClient(
             [
                 json.dumps(
@@ -148,130 +121,65 @@ class VisualGenerationServiceTests(unittest.TestCase):
                 )
             ]
         )
-        image_client = FakeImageClient(["image-1", "image-2"])
+        tikz_client = FakeChatClient(
+            [
+                json.dumps(
+                    {
+                        "tikz_source": "\\begin{tikzpicture}\\draw (0,0) rectangle (1,1);\\end{tikzpicture}"
+                    }
+                ),
+                json.dumps(
+                    {
+                        "tikz_source": "\\begin{tikzpicture}\\draw[->] (0,0)--(2,0);\\end{tikzpicture}"
+                    }
+                ),
+            ]
+        )
         service = VisualGenerationService(
             VisualInstructionAgent(instruction_client),
-            image_client,
-            VisualValidatorAgent(
-                FakeChatClient(
-                    [
-                        json.dumps(
-                            {"status": "pass", "confidence": 0.9, "findings": []}
-                        ),
-                        json.dumps(
-                            {"status": "pass", "confidence": 0.9, "findings": []}
-                        ),
-                    ]
-                )
-            ),
-            VisualRepairAgent(FakeChatClient([])),
+            TikZGenerationAgent(tikz_client),
         )
 
         result = service.generate_visual(self.request())
 
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["visual_validation_status"], "pass")
-        self.assertEqual([asset["id"] for asset in result["visual_assets"]], ["figure_1", "figure_2"])
-        self.assertEqual(image_client.prompts, ["Draw the cart setup.", "Draw the potential graph."])
+        self.assertEqual(
+            [asset["id"] for asset in result["visual_assets"]],
+            ["figure_1", "figure_2"],
+        )
+        self.assertEqual(len(result["attempts"]), 2)
+        self.assertEqual(len(tikz_client.messages), 2)
 
-    def test_uncertain_validator_preserves_image_without_repair(self):
-        service = VisualGenerationService(
-            VisualInstructionAgent(
-                FakeChatClient(
-                    [
-                        json.dumps(
+    def test_rejects_non_tikz_source(self):
+        instruction_client = FakeChatClient(
+            [
+                json.dumps(
+                    {
+                        "needed": True,
+                        "visuals": [
                             {
-                                "needed": True,
+                                "id": "figure_1",
                                 "placement": "problem",
                                 "purpose": "diagram",
-                                "prompt": "Draw a graph.",
+                                "prompt": "Draw a cart setup.",
                                 "must_include": [],
                                 "must_not_include": [],
                             }
-                        )
-                    ]
+                        ],
+                    }
                 )
-            ),
-            FakeImageClient(["image-1"]),
-            VisualValidatorAgent(
-                FakeChatClient(
-                    [
-                        json.dumps(
-                            {
-                                "status": "uncertain",
-                                "confidence": 0.45,
-                                "findings": [],
-                            }
-                        )
-                    ]
-                )
-            ),
-            VisualRepairAgent(FakeChatClient([])),
+            ]
         )
-
-        result = service.generate_visual(self.request())
-
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["visual_validation_status"], "uncertain")
-        self.assertEqual(len(result["attempts"]), 1)
-
-    def test_repairs_existing_image_after_repair_required(self):
-        image_client = FakeImageClient(["bad-image", "good-image"])
-        repair_client = FakeChatClient([json.dumps({"prompt": "Draw a thinner rod."})])
+        tikz_client = FakeChatClient(
+            [
+                json.dumps({"tikz_source": "\\draw (0,0)--(1,0);"}),
+                json.dumps({"tikz_source": "\\draw (0,0)--(1,0);"}),
+            ]
+        )
         service = VisualGenerationService(
-            VisualInstructionAgent(
-                FakeChatClient(
-                    [
-                        json.dumps(
-                            {
-                                "needed": True,
-                                "placement": "problem",
-                                "purpose": "diagram",
-                                "prompt": "Draw a rod.",
-                                "must_include": ["rod"],
-                                "must_not_include": [],
-                            }
-                        )
-                    ]
-                )
-            ),
-            image_client,
-            VisualValidatorAgent(
-                FakeChatClient(
-                    [
-                        json.dumps(
-                            {
-                                "status": "repair_required",
-                                "confidence": 0.9,
-                                "findings": [
-                                    {
-                                        "issue": "rod is too thick",
-                                        "evidence": "visible rectangle",
-                                        "severity": "major",
-                                    }
-                                ],
-                            }
-                        ),
-                        json.dumps(
-                            {
-                                "status": "pass",
-                                "confidence": 0.95,
-                                "findings": [],
-                            }
-                        ),
-                    ]
-                )
-            ),
-            VisualRepairAgent(repair_client),
-            max_repair_attempts=1,
+            VisualInstructionAgent(instruction_client),
+            TikZGenerationAgent(tikz_client),
         )
 
-        result = service.generate_visual(self.request())
-
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(image_client.prompts, ["Draw a rod."])
-        self.assertEqual(image_client.edits, [("bad-image", "Draw a thinner rod.")])
-        self.assertEqual(result["visual_assets"][0]["base64"], "good-image")
-        self.assertEqual(result["attempts"][0]["action"], "generate")
-        self.assertEqual(result["attempts"][1]["action"], "edit")
-        self.assertEqual(len(result["attempts"]), 2)
+        with self.assertRaisesRegex(ModelOutputError, "tikzpicture"):
+            service.generate_visual(self.request())

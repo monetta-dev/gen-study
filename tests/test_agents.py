@@ -1,8 +1,8 @@
 from io import StringIO
+import json
 import unittest
 
 from mathgen.agents import (
-    AdjudicatorAgent,
     GeneratorAgent,
     InteractionTracer,
     MathGenerationService,
@@ -44,7 +44,6 @@ class AgentTests(unittest.TestCase):
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(critical_validator_client),
             ComplianceValidatorAgent(compliance_validator_client),
@@ -61,11 +60,12 @@ class AgentTests(unittest.TestCase):
         self.assertNotIn("visual_assets", result)
         generator_system_prompt = generator_client.messages[0][0]["content"]
         compliance_system_prompt = compliance_validator_client.messages[0][0]["content"]
-        self.assertIn("Write both the problem and solution in Japanese", generator_system_prompt)
+        self.assertIn("complete solution in Japanese", generator_system_prompt)
         self.assertIn('{"problem":"...","solution":"..."}', generator_system_prompt)
-        self.assertIn("Prioritize the requested difficulty level", generator_system_prompt)
-        self.assertIn("topic as a loose anchor", generator_system_prompt)
-        self.assertIn("Do not make the problem easier", generator_system_prompt)
+        self.assertIn("Match the requested subject, difficulty level, and topic", generator_system_prompt)
+        self.assertIn("entrance-exam difficulty within", generator_system_prompt)
+        self.assertIn("not university-level knowledge", generator_system_prompt)
+        self.assertIn('topic is broad, vague, or "free"', generator_system_prompt)
         self.assertIn("Japanese Output", compliance_system_prompt)
         self.assertIn("Text-only Policy", compliance_system_prompt)
         self.assertIn("more important than strict topic centrality", compliance_system_prompt)
@@ -81,7 +81,6 @@ class AgentTests(unittest.TestCase):
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(
                 FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
@@ -109,7 +108,6 @@ class AgentTests(unittest.TestCase):
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(FakeClient([])),
             ComplianceValidatorAgent(FakeClient([])),
@@ -131,14 +129,6 @@ class AgentTests(unittest.TestCase):
                 '{"problem":"fixed","solution":"fixed"}',
             ]
         )
-        adjudicator_client = FakeClient(
-            [
-                (
-                    '{"decision":"repair_required","reason":"validator finding is valid",'
-                    '"repair_focus":"fix the calculation"}'
-                ),
-            ]
-        )
         critical_validator_client = FakeClient(
             [
                 '{"passed":false,"solution_accurate":false,"issues":["calculation error"]}',
@@ -152,7 +142,6 @@ class AgentTests(unittest.TestCase):
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            AdjudicatorAgent(adjudicator_client),
             RepairAgent(repair_client),
             CriticalValidatorAgent(critical_validator_client),
             ComplianceValidatorAgent(compliance_validator_client),
@@ -171,8 +160,8 @@ class AgentTests(unittest.TestCase):
         self.assertIn("too easy for the requested level", repair_system_prompt)
         self.assertIn("Change only what is necessary", repair_system_prompt)
         self.assertIn('"validation_stage": "critical"', repair_payload)
-        self.assertIn('"adjudicator_decision": "repair_required"', repair_payload)
-        self.assertIn('"repair_focus": "fix the calculation"', repair_payload)
+        repair_data = json.loads(repair_payload)
+        self.assertEqual(set(repair_data), {"subject", "level", "topic", "validation_stage", "validator_issues", "problem", "solution"})
         self.assertIn("calculation error", repair_payload)
         self.assertNotIn("diagram_spec", repair_payload)
 
@@ -187,18 +176,6 @@ class AgentTests(unittest.TestCase):
                 '{"problem":"still bad","solution":"still bad"}',
             ]
         )
-        adjudicator_client = FakeClient(
-            [
-                (
-                    '{"decision":"repair_required","reason":"validator finding is valid",'
-                    '"repair_focus":"fix the calculation"}'
-                ),
-                (
-                    '{"decision":"repair_required","reason":"validator finding is still valid",'
-                    '"repair_focus":"fix the remaining error"}'
-                ),
-            ]
-        )
         critical_validator_client = FakeClient(
             [
                 '{"passed":false,"solution_accurate":false,"issues":["calculation error"]}',
@@ -207,7 +184,6 @@ class AgentTests(unittest.TestCase):
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            AdjudicatorAgent(adjudicator_client),
             RepairAgent(repair_client),
             CriticalValidatorAgent(critical_validator_client),
             ComplianceValidatorAgent(FakeClient([])),
@@ -222,65 +198,15 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(len(generator_client.messages), 1)
         self.assertEqual(len(repair_client.messages), 1)
 
-    def test_service_ignores_critical_validator_false_positive(self):
+    def test_service_repairs_after_compliance_validator_failure(self):
         generator_client = FakeClient(
             [
-                '{"problem":"valid","solution":"valid"}',
-            ]
-        )
-        adjudicator_client = FakeClient(
-            [
-                (
-                    '{"decision":"validator_false_positive",'
-                    '"reason":"validator misunderstood the solution",'
-                    '"repair_focus":""}'
-                ),
-            ]
-        )
-        critical_validator_client = FakeClient(
-            [
-                '{"passed":false,"solution_accurate":false,"issues":["not actually wrong"]}',
-            ]
-        )
-        compliance_validator_client = FakeClient(
-            [
-                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
-            ]
-        )
-        repair_client = FakeClient([])
-        service = MathGenerationService(
-            GeneratorAgent(generator_client),
-            AdjudicatorAgent(adjudicator_client),
-            RepairAgent(repair_client),
-            CriticalValidatorAgent(critical_validator_client),
-            ComplianceValidatorAgent(compliance_validator_client),
-            max_repair_attempts=1,
-        )
-
-        result = service.generate_verified(GenerateRequest(level="Standard", topic="Calculus"))
-
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["problem"], "valid")
-        self.assertEqual(len(repair_client.messages), 0)
-
-    def test_service_repairs_when_adjudicator_requests_clarification(self):
-        generator_client = FakeClient(
-            [
-                '{"problem":"ambiguous","solution":"ambiguous"}',
-            ]
-        )
-        adjudicator_client = FakeClient(
-            [
-                (
-                    '{"decision":"clarify_definition_required",'
-                    '"reason":"sign convention is ambiguous",'
-                    '"repair_focus":"clarify the sign convention"}'
-                ),
+                '{"problem":"行列式を求めよ。","solution":"行列式の性質を用いる。"}',
             ]
         )
         repair_client = FakeClient(
             [
-                '{"problem":"clarified","solution":"clarified"}',
+                '{"problem":"数列の和を求めよ。","solution":"差分を用いる。"}',
             ]
         )
         critical_validator_client = FakeClient(
@@ -291,26 +217,32 @@ class AgentTests(unittest.TestCase):
         )
         compliance_validator_client = FakeClient(
             [
-                '{"passed":false,"curriculum_compliant":true,"issues":["ambiguous convention"]}',
+                (
+                    '{"passed":false,"curriculum_compliant":false,'
+                    '"issues":["required knowledge exceeds curriculum scope"]}'
+                ),
                 '{"passed":true,"curriculum_compliant":true,"issues":[]}',
             ]
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            AdjudicatorAgent(adjudicator_client),
             RepairAgent(repair_client),
             CriticalValidatorAgent(critical_validator_client),
             ComplianceValidatorAgent(compliance_validator_client),
             max_repair_attempts=1,
         )
 
-        result = service.generate_verified(GenerateRequest(level="Standard", topic="Mechanics"))
+        result = service.generate_verified(
+            GenerateRequest(level="Any elite entrance exam", topic="free")
+        )
 
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["problem"], "clarified")
+        self.assertEqual(result["problem"], "数列の和を求めよ。")
         repair_payload = repair_client.messages[0][1]["content"]
-        self.assertIn('"adjudicator_decision": "clarify_definition_required"', repair_payload)
-        self.assertIn("clarify the sign convention", repair_payload)
+        self.assertIn('"validation_stage": "compliance"', repair_payload)
+        self.assertIn("required knowledge exceeds curriculum scope", repair_payload)
+        repair_data = json.loads(repair_payload)
+        self.assertEqual(set(repair_data), {"subject", "level", "topic", "validation_stage", "validator_issues", "problem", "solution"})
 
     def test_request_requires_level_and_topic(self):
         with self.assertRaisesRegex(ValueError, "level"):
@@ -358,7 +290,6 @@ class AgentTests(unittest.TestCase):
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(critical_validator_client),
             ComplianceValidatorAgent(compliance_validator_client),
@@ -410,7 +341,6 @@ class AgentTests(unittest.TestCase):
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(critical_validator_client),
             ComplianceValidatorAgent(compliance_validator_client),
@@ -488,7 +418,6 @@ class AgentTests(unittest.TestCase):
         )
         service = MathGenerationService(
             GeneratorAgent(generator_client, tracer=tracer),
-            AdjudicatorAgent(FakeClient([]), tracer=tracer),
             RepairAgent(FakeClient([]), tracer=tracer),
             CriticalValidatorAgent(critical_validator_client, tracer=tracer),
             ComplianceValidatorAgent(compliance_validator_client, tracer=tracer),

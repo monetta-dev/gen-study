@@ -8,23 +8,17 @@ Supported subjects:
 - `physics`
 - `chemistry`
 
-This API is text-only. It generates and validates Japanese problem/solution text; image and visual generation are handled by a separate API.
-Requests containing `allow_visuals` or `allow_diagram` are rejected by this API.
+`POST /generate` is text-only. It generates and validates Japanese
+problem/solution text; visual generation is handled separately by
+`POST /visuals/generate`, which returns TikZ source. Requests to `/generate`
+containing `allow_visuals` or `allow_diagram` are rejected.
 
 ## Requirements
 
 - Python 3.11+
-- `OPENCODE_GO_API_KEY` in `.env` or the shell environment
+- `OPENCODE_GO_API_KEY` in `.env.local` or the shell environment
 - Optional: `OPENCODE_GO_MODEL`, defaults to `qwen3.7-max`
-- Optional future visual API setting: `VISUAL_VALIDATOR_MODEL`, defaults to `qwen3.7-plus`
-- Optional visual API setting: `OPENAI_API_KEY`, required for `POST /visuals/generate`
-- Optional visual API setting: `OPENAI_IMAGE_MODEL`, defaults to `gpt-image-2`
-- Optional visual API setting: `OPENAI_IMAGE_SIZE`; blank means omitted
-- Optional visual API setting: `OPENAI_IMAGE_QUALITY`; blank means omitted
-- Optional visual API setting: `OPENAI_IMAGE_N`; blank means omitted
-- Optional visual API setting: `OPENAI_IMAGE_RETRY_ATTEMPTS`, defaults to `3`
-- Optional visual API setting: `OPENAI_IMAGE_RETRY_DELAY_SECONDS`, defaults to `60`
-- Optional visual API setting: `VISUAL_REPAIR_ATTEMPTS`, defaults to `2`
+- Optional visual API setting: `VISUAL_TIKZ_MODEL`, defaults to `qwen3.7-max`
 - Optional: `OPENCODE_GO_BASE_URL`, defaults to `https://opencode.ai/zen/go/v1`
 - Optional: `OPENCODE_GO_API_STYLE`; normally omitted and inferred from the model
 - Optional: `OPENCODE_GO_TIMEOUT_SECONDS`, defaults to `300`
@@ -48,37 +42,36 @@ The implementation uses only the Python standard library.
 
 ## Run
 
-Create `.env`:
+Create `.env.local`:
 
 ```bash
-cp .env.example .env
+cp .env.example .env.local
 ```
 
-Then edit `.env` and set your actual API key:
+Then edit `.env.local` and set your actual API key:
 
 ```dotenv
 OPENCODE_GO_API_KEY=your_opencode_go_api_key_here
 OPENCODE_GO_MODEL=qwen3.7-max
-VISUAL_VALIDATOR_MODEL=qwen3.7-plus
+VISUAL_TIKZ_MODEL=qwen3.7-max
+OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
+OPENCODE_GO_API_STYLE=
 OPENCODE_GO_STREAM=true
 OPENCODE_GO_TIMEOUT_SECONDS=300
+OPENCODE_GO_MAX_TOKENS=32768
 OPENCODE_GO_THINKING_ENABLED=true
+OPENCODE_GO_THINKING_BUDGET_TOKENS=16384
 OPENCODE_GO_THINKING_DISPLAY=omitted
+OPENCODE_GO_ANTHROPIC_VERSION=2023-06-01
+OPENCODE_GO_USER_AGENT=gen-study/0.1 OpenCode Go client
 OPENCODE_GO_RETRY_ATTEMPTS=3
 OPENCODE_GO_RETRY_DELAY_SECONDS=10
-OPENAI_API_KEY=your_openai_api_key_here
-OPENAI_IMAGE_MODEL=gpt-image-2
-OPENAI_IMAGE_SIZE=
-OPENAI_IMAGE_QUALITY=
-OPENAI_IMAGE_N=
-OPENAI_IMAGE_RETRY_ATTEMPTS=3
-OPENAI_IMAGE_RETRY_DELAY_SECONDS=60
-VISUAL_REPAIR_ATTEMPTS=2
 MAX_REPAIR_ATTEMPTS=
 GENERATION_TRACE=false
 API_HOST=127.0.0.1
 API_PORT=8000
 API_DEBUG=false
+API_MAX_BODY_BYTES=65536
 API_ALLOWED_ORIGIN=*
 GEN_STUDY_API_KEY=
 ```
@@ -97,7 +90,7 @@ To see each Generator and Validator exchange in the server terminal, set:
 GENERATION_TRACE=true
 ```
 
-The trace shows the prompts sent to each agent, the JSON content returned by each agent, validator decisions, adjudicator decisions, and repair exchanges. It does not expose private model thinking tokens.
+The trace shows the prompts sent to each agent, the JSON content returned by each agent, validator decisions, and repair exchanges. It does not expose private model thinking tokens.
 
 For local debugging, enable detailed API errors:
 
@@ -118,7 +111,7 @@ includes the exception message. Keep `API_DEBUG=false` in production.
 ## Model Provider
 
 The backend is standardized on OpenCode Go. For Qwen3.7 Max, configure Render or
-`.env` like this:
+`.env.local` like this:
 
 ```dotenv
 OPENCODE_GO_API_KEY=your_opencode_go_api_key
@@ -161,34 +154,15 @@ OpenCode Go models currently handled as Anthropic-compatible `/messages`:
 For visual generation, the API first asks a visual instruction agent whether a
 diagram, graph, chemical structure, or explanatory figure is needed for the
 completed problem and solution. It can request multiple separate visuals for one
-problem. If visuals are needed, it sends each final natural-language prompt to
-OpenAI's Image API using `OPENAI_IMAGE_MODEL`, then validates each PNG with
-`qwen3.7-plus` through OpenCode Go. When validation requires repair, the API uses
-OpenAI image editing with the previous PNG as input instead of regenerating the
-figure from scratch.
-
-Use `qwen3.7-plus` as the default image-recognition validator model:
+problem. Visual assets are generated as TikZ source:
 
 ```dotenv
-VISUAL_VALIDATOR_MODEL=qwen3.7-plus
+VISUAL_TIKZ_MODEL=qwen3.7-max
 ```
 
-Configure the OpenAI image generation side separately:
-
-```dotenv
-OPENAI_API_KEY=your_openai_api_key
-OPENAI_IMAGE_MODEL=gpt-image-2
-OPENAI_IMAGE_SIZE=
-OPENAI_IMAGE_QUALITY=
-OPENAI_IMAGE_N=
-OPENAI_IMAGE_RETRY_ATTEMPTS=3
-OPENAI_IMAGE_RETRY_DELAY_SECONDS=60
-VISUAL_REPAIR_ATTEMPTS=2
-```
-
-The text-only `/generate` endpoint does not read these visual settings. The
-visual API uses a separate OpenCode Go client for image validation so validator
-cost and quality can be tuned independently from the main text generation model.
+The visual API returns `tikz_source` only and does not compile LaTeX on the
+server. This keeps the main API fast and avoids a heavy TeX runtime dependency.
+The text-only `/generate` endpoint does not read this visual setting.
 
 OpenCode Go models currently handled as OpenAI-compatible `/chat/completions`:
 
@@ -251,13 +225,7 @@ Each generation attempt is checked by two focused validators:
 1. `CriticalValidator` checks genuine correctness issues: calculation errors, invalid equations, unit errors, logical gaps, contradictions, missing conditions, and problem/solution inconsistencies.
 2. `ComplianceValidator` checks system acceptance: Japanese curriculum scope, Japanese output, subject/topic alignment, requested level alignment, and text-only policy.
 
-When either validator rejects a candidate, `Adjudicator` first determines whether the finding is valid:
-
-- `repair_required`: send the candidate and validator issues to `RepairAgent`.
-- `validator_false_positive`: ignore the validator finding and continue or accept.
-- `clarify_definition_required`: send the candidate to `RepairAgent` with a clarification focus.
-
-The repair agent revises the same candidate and validation runs again. By default there is no hard repair limit; set `MAX_REPAIR_ATTEMPTS` to a non-negative integer if you need a production cost guardrail.
+When either validator rejects a candidate, `RepairAgent` receives the same candidate plus the validator issues and revises it directly. Validation then runs again. By default there is no hard repair limit; set `MAX_REPAIR_ATTEMPTS` to a non-negative integer if you need a production cost guardrail.
 
 ## Request
 
@@ -275,29 +243,27 @@ curl -X POST http://127.0.0.1:8000/visuals/generate \
   -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics","problem":"問題文...","solution":"解答..."}'
 ```
 
-If visuals are needed, the response includes one or more PNG assets as base64:
+If visuals are needed, the response includes one or more TikZ assets:
 
 ```json
 {
   "status": "success",
+  "visual_backend": "tikz",
   "visual_needed": true,
-  "visual_validation_status": "pass",
   "visual_assets": [
     {
-      "mime_type": "image/png",
-      "base64": "...",
+      "mime_type": "text/x-tex",
       "id": "visual_1",
       "placement": "problem",
       "purpose": "diagram",
-      "prompt": "..."
+      "tikz_source": "\\begin{tikzpicture}...\\end{tikzpicture}"
     }
   ]
 }
 ```
 
-If the vision validator is uncertain, the API preserves the generated image and
-returns `visual_validation_status: "uncertain"` instead of automatically
-rewriting a likely acceptable figure.
+The API does not render or compile the TikZ server-side. Use the GUI or your own
+LaTeX toolchain to inspect the returned source.
 
 With API key authentication enabled:
 

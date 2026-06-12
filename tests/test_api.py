@@ -5,7 +5,6 @@ import urllib.error
 import urllib.request
 
 from mathgen.agents import (
-    AdjudicatorAgent,
     ComplianceValidatorAgent,
     CriticalValidatorAgent,
     GeneratorAgent,
@@ -15,7 +14,6 @@ from mathgen.agents import (
 )
 from mathgen.api import MathGenerationHandler, create_server
 from mathgen.models import ModelOutputError
-from mathgen.openai_images import ImageGenerationError
 
 
 class FakeClient:
@@ -107,7 +105,6 @@ class ApiTests(unittest.TestCase):
     def test_generate_endpoint_returns_verified_problem(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient(['{"problem":"問 $x$","solution":"解 $x=1$"}'])),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(
                 FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
@@ -131,7 +128,6 @@ class ApiTests(unittest.TestCase):
         tracer = InteractionTracer(capture=True)
         service = MathGenerationService(
             GeneratorAgent(FakeClient(['{"problem":"問","solution":"解"}']), tracer=tracer),
-            AdjudicatorAgent(FakeClient([]), tracer=tracer),
             RepairAgent(FakeClient([]), tracer=tracer),
             CriticalValidatorAgent(
                 FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}']),
@@ -161,7 +157,6 @@ class ApiTests(unittest.TestCase):
     def test_generate_endpoint_rejects_invalid_request(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient([])),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(FakeClient([])),
             ComplianceValidatorAgent(FakeClient([])),
@@ -181,7 +176,6 @@ class ApiTests(unittest.TestCase):
     def test_generate_endpoint_returns_json_for_unexpected_errors(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient([RuntimeError("provider disconnected")])),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(FakeClient([])),
             ComplianceValidatorAgent(FakeClient([])),
@@ -206,7 +200,6 @@ class ApiTests(unittest.TestCase):
     def test_generate_endpoint_reports_model_output_errors_as_bad_gateway(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient([ModelOutputError("Model response JSON was invalid")])),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(FakeClient([])),
             ComplianceValidatorAgent(FakeClient([])),
@@ -230,7 +223,6 @@ class ApiTests(unittest.TestCase):
     def test_generate_endpoint_returns_debug_detail_when_enabled(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient([RuntimeError("provider disconnected")])),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(FakeClient([])),
             ComplianceValidatorAgent(FakeClient([])),
@@ -254,7 +246,6 @@ class ApiTests(unittest.TestCase):
     def test_generate_endpoint_requires_api_key_when_configured(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient(['{"problem":"問","solution":"解"}'])),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(
                 FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
@@ -289,7 +280,6 @@ class ApiTests(unittest.TestCase):
     def test_generate_endpoint_rejects_oversized_request_body(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient([])),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(FakeClient([])),
             ComplianceValidatorAgent(FakeClient([])),
@@ -312,7 +302,6 @@ class ApiTests(unittest.TestCase):
     def test_root_serves_frontend(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient([])),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(FakeClient([])),
             ComplianceValidatorAgent(FakeClient([])),
@@ -328,7 +317,6 @@ class ApiTests(unittest.TestCase):
     def test_options_returns_cors_headers(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient([])),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(FakeClient([])),
             ComplianceValidatorAgent(FakeClient([])),
@@ -360,8 +348,8 @@ class ApiTests(unittest.TestCase):
                     "visual_validation_status": "pass",
                     "visual_assets": [
                         {
-                            "mime_type": "image/png",
-                            "base64": "png-base64",
+                            "mime_type": "text/x-tex",
+                            "tikz_source": "\\begin{tikzpicture}\\draw (0,0)--(1,0);\\end{tikzpicture}",
                             "placement": "problem",
                             "purpose": "diagram",
                             "prompt": "Draw a cart.",
@@ -374,7 +362,6 @@ class ApiTests(unittest.TestCase):
 
         service = MathGenerationService(
             GeneratorAgent(FakeClient([])),
-            AdjudicatorAgent(FakeClient([])),
             RepairAgent(FakeClient([])),
             CriticalValidatorAgent(FakeClient([])),
             ComplianceValidatorAgent(FakeClient([])),
@@ -396,36 +383,5 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "success")
-        self.assertEqual(payload["visual_assets"][0]["base64"], "png-base64")
+        self.assertIn("\\begin{tikzpicture}", payload["visual_assets"][0]["tikz_source"])
         self.assertEqual(payload["trace"], ["visual trace"])
-
-    def test_visuals_generate_endpoint_returns_image_generation_error(self):
-        class FakeVisualService:
-            def generate_visual(self, request):
-                raise ImageGenerationError("OPENAI_API_KEY is not configured")
-
-        service = MathGenerationService(
-            GeneratorAgent(FakeClient([])),
-            AdjudicatorAgent(FakeClient([])),
-            RepairAgent(FakeClient([])),
-            CriticalValidatorAgent(FakeClient([])),
-            ComplianceValidatorAgent(FakeClient([])),
-        )
-        server = self.start_server(service, visual_service=FakeVisualService())
-
-        with self.assertRaises(urllib.error.HTTPError) as context:
-            self.post_json(
-                server,
-                {
-                    "subject": "physics",
-                    "problem": "問題文",
-                    "solution": "解答",
-                },
-                path="/visuals/generate",
-            )
-
-        error = context.exception
-        self.assertEqual(error.code, 502)
-        payload = json.loads(error.read().decode("utf-8"))
-        error.close()
-        self.assertEqual(payload["error"], "image_generation_error")

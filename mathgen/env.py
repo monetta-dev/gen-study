@@ -1,4 +1,4 @@
-"""Minimal .env loading for local configuration."""
+"""Minimal .env.local loading for local configuration."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 
-def load_dotenv(path: str | Path = ".env") -> None:
+def load_dotenv(path: str | Path = ".env.local") -> None:
     env_path = Path(path)
     if not env_path.exists():
         return

@@ -8,7 +8,6 @@ from typing import Any, Callable, Protocol, TypeVar
 
 from .json_utils import parse_json_object
 from .models import (
-    AdjudicationResult,
     ComplianceValidationResult,
     ContractError,
     CriticalValidationResult,
@@ -76,15 +75,6 @@ class InteractionTracer:
         self._write(
             f"--- {validator_name} decision ---\n"
             f"passed={passed}, {extra}, issues={list(issues)}"
-        )
-
-    def log_adjudication_result(self, result: AdjudicationResult) -> None:
-        if not self.enabled and not self.capture:
-            return
-        self._write(
-            "--- Adjudicator decision ---\n"
-            f"decision={result.decision}, reason={result.reason}, "
-            f"repair_focus={result.repair_focus}"
         )
 
     def log_attempt(self, attempt: int, request: GenerateRequest) -> None:
@@ -243,15 +233,12 @@ def _subject_instruction(subject: str) -> dict[str, str]:
 
 def generator_system_prompt(subject: str) -> str:
     instruction = _subject_instruction(subject)
-    return f"""You are Generator, {instruction["generator_role"]}.
-Create one original Japanese university entrance exam {instruction["subject_name"]} question.
+    return f"""You are an expert author of original Japanese university entrance exam {instruction["subject_name"]} questions.
+Create one original question and complete solution in Japanese.
+Match the requested subject, difficulty level, and topic.
+The requested level means entrance-exam difficulty within the {instruction["curriculum_scope"]}, not university-level knowledge.
+If the topic is broad, vague, or "free", choose a suitable theme that best matches the requested level.
 Use internal reasoning if available, but output only strict JSON.
-Write both the problem and solution in Japanese.
-The problem must be solvable within the {instruction["curriculum_scope"]}.
-Prioritize the requested difficulty level over the requested topic. Treat the topic as a loose anchor, not a narrow syllabus box: the problem may use the topic only as a small component if that better matches the requested level.
-If the topic is broad, vague, or "free", choose a problem whose difficulty, reasoning depth, and exam style best match the requested level.
-For elite levels such as University of Tokyo, Kyoto University, Waseda, or Keio, avoid routine one-step or template exercises. Use multi-step reasoning, non-obvious setup, synthesis of multiple high-school concepts, and concise exam-style wording without excessive guidance.
-Do not make the problem easier merely to keep the requested topic central.
 {instruction["constraints"]}
 Return exactly this JSON shape:
 {{"problem":"...","solution":"..."}}"""
@@ -290,30 +277,16 @@ Return exactly this JSON shape:
 def repair_system_prompt(subject: str) -> str:
     instruction = _subject_instruction(subject)
     return f"""You are RepairAgent, an independent {instruction["subject_name"]} revision specialist.
-Revise the existing problem and solution using the validator feedback and adjudicator guidance.
+Revise the existing problem and solution using the validator feedback.
 Preserve the requested subject, difficulty level, Japanese output, and overall intent. Preserve topic relevance when possible, but prioritize level calibration over keeping the topic central.
 Change only what is necessary to resolve the reported issues.
+Treat the requested level as a difficulty target within the curriculum scope, never as permission to use knowledge beyond that scope.
 Do not introduce university-level subject knowledge or mathematics.
 The repaired problem must remain solvable within the {instruction["curriculum_scope"]}.
 If the issue is that the problem is too easy for the requested level, increase depth through synthesis, hidden setup, or non-obvious reasoning rather than by adding out-of-curriculum knowledge.
 {instruction["constraints"]}
 Return exactly this JSON shape:
 {{"problem":"...","solution":"..."}}"""
-
-
-def adjudicator_system_prompt(subject: str) -> str:
-    instruction = _subject_instruction(subject)
-    return f"""You are Adjudicator, an independent reviewer of validator findings for {instruction["subject_name"]}.
-Your job is not to solve or repair the problem.
-Review the validator finding and decide whether the finding is valid.
-Choose exactly one decision:
-- repair_required: the validator finding is valid and the candidate should be repaired.
-- validator_false_positive: the validator likely misunderstood, overreached, or made a high-probability false finding.
-- clarify_definition_required: the problem or solution is ambiguous because a definition, convention, condition, or assumption needs clarification.
-If clarification is required, repair_focus should describe the definition or condition to clarify.
-Use internal reasoning if available, but output only strict JSON.
-Return exactly this JSON shape:
-{{"decision":"repair_required|validator_false_positive|clarify_definition_required","reason":"...","repair_focus":"..."}}"""
 
 
 class GeneratorAgent:
@@ -359,7 +332,6 @@ class RepairAgent:
         generated: GeneratedProblem,
         validation_stage: str,
         issues: tuple[str, ...],
-        adjudication: AdjudicationResult,
     ) -> GeneratedProblem:
         messages = [
             {"role": "system", "content": repair_system_prompt(request.subject)},
@@ -372,9 +344,6 @@ class RepairAgent:
                         "topic": request.topic,
                         "validation_stage": validation_stage,
                         "validator_issues": list(issues),
-                        "adjudicator_decision": adjudication.decision,
-                        "adjudicator_reason": adjudication.reason,
-                        "repair_focus": adjudication.repair_focus,
                         "problem": generated.problem,
                         "solution": generated.solution,
                     },
@@ -390,53 +359,6 @@ class RepairAgent:
             GeneratedProblem.from_dict,
             '{"problem":"...","solution":"..."}',
         )
-
-
-class AdjudicatorAgent:
-    def __init__(
-        self, client: ChatClient, tracer: InteractionTracer | None = None
-    ) -> None:
-        self.client = client
-        self.tracer = tracer or InteractionTracer()
-
-    def adjudicate(
-        self,
-        request: GenerateRequest,
-        generated: GeneratedProblem,
-        validation_stage: str,
-        issues: tuple[str, ...],
-    ) -> AdjudicationResult:
-        messages = [
-            {"role": "system", "content": adjudicator_system_prompt(request.subject)},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "subject": request.subject,
-                        "level": request.level,
-                        "topic": request.topic,
-                        "validation_stage": validation_stage,
-                        "validator_issues": list(issues),
-                        "problem": generated.problem,
-                        "solution": generated.solution,
-                    },
-                    ensure_ascii=False,
-                ),
-            },
-        ]
-        adjudication = chat_json(
-            "Adjudicator",
-            self.client,
-            self.tracer,
-            messages,
-            AdjudicationResult.from_dict,
-            (
-                '{"decision":"repair_required|validator_false_positive|'
-                'clarify_definition_required","reason":"...","repair_focus":"..."}'
-            ),
-        )
-        self.tracer.log_adjudication_result(adjudication)
-        return adjudication
 
 
 def _validation_payload(
@@ -520,7 +442,6 @@ class MathGenerationService:
     def __init__(
         self,
         generator: GeneratorAgent,
-        adjudicator: AdjudicatorAgent,
         repair_agent: RepairAgent,
         critical_validator: CriticalValidatorAgent,
         compliance_validator: ComplianceValidatorAgent,
@@ -530,7 +451,6 @@ class MathGenerationService:
         if max_repair_attempts is not None and max_repair_attempts < 0:
             raise ValueError("max_repair_attempts must be at least 0")
         self.generator = generator
-        self.adjudicator = adjudicator
         self.repair_agent = repair_agent
         self.critical_validator = critical_validator
         self.compliance_validator = compliance_validator
@@ -553,47 +473,12 @@ class MathGenerationService:
                     curriculum_compliant=True,
                     issues=critical_validation.issues,
                 )
-                adjudication = self.adjudicator.adjudicate(
-                    request, generated, "critical", last_validation.issues
-                )
-                if adjudication.decision == "validator_false_positive":
-                    compliance_validation = self.compliance_validator.validate(request, generated)
-                    if compliance_validation.passed:
-                        result = generated.to_success_response()
-                        self.tracer.log_final_result(result)
-                        return result
-                    last_validation = ValidationResult(
-                        passed=False,
-                        solution_accurate=True,
-                        curriculum_compliant=compliance_validation.curriculum_compliant,
-                        issues=compliance_validation.issues,
-                    )
-                    adjudication = self.adjudicator.adjudicate(
-                        request, generated, "compliance", last_validation.issues
-                    )
-                    if adjudication.decision == "validator_false_positive":
-                        result = generated.to_success_response()
-                        self.tracer.log_final_result(result)
-                        return result
-                    generated = self._repair_or_finish(
-                        request,
-                        generated,
-                        "compliance",
-                        last_validation.issues,
-                        repair_count,
-                        adjudication,
-                    )
-                    if generated is None:
-                        break
-                    repair_count += 1
-                    continue
                 generated = self._repair_or_finish(
                     request,
                     generated,
                     "critical",
                     last_validation.issues,
                     repair_count,
-                    adjudication,
                 )
                 if generated is None:
                     break
@@ -611,20 +496,12 @@ class MathGenerationService:
                 curriculum_compliant=compliance_validation.curriculum_compliant,
                 issues=compliance_validation.issues,
             )
-            adjudication = self.adjudicator.adjudicate(
-                request, generated, "compliance", last_validation.issues
-            )
-            if adjudication.decision == "validator_false_positive":
-                result = generated.to_success_response()
-                self.tracer.log_final_result(result)
-                return result
             generated = self._repair_or_finish(
                 request,
                 generated,
                 "compliance",
                 last_validation.issues,
                 repair_count,
-                adjudication,
             )
             if generated is None:
                 break
@@ -642,12 +519,11 @@ class MathGenerationService:
         validation_stage: str,
         issues: tuple[str, ...],
         repair_count: int,
-        adjudication: AdjudicationResult,
     ) -> GeneratedProblem | None:
         if self.max_repair_attempts is not None and repair_count >= self.max_repair_attempts:
             return None
         next_attempt = repair_count + 1
         self.tracer.log_repair_attempt(next_attempt, validation_stage, issues)
         return self.repair_agent.repair(
-            request, generated, validation_stage, issues, adjudication
+            request, generated, validation_stage, issues
         )

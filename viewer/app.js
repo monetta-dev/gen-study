@@ -320,10 +320,10 @@ function renderVisualResponse(data) {
     const figure = document.createElement("figure");
     figure.className = "visual-figure";
 
-    const image = document.createElement("img");
-    image.alt = `${asset.purpose || "visual"} ${asset.id || index + 1}`;
-    image.src = `data:${asset.mime_type || "image/png"};base64,${asset.base64 || ""}`;
-    figure.appendChild(image);
+    const source = document.createElement("pre");
+    source.className = "tikz-source";
+    source.textContent = asset.tikz_source || "No TikZ source was returned.";
+    figure.appendChild(source);
 
     const caption = document.createElement("figcaption");
     const title = document.createElement("strong");
@@ -524,7 +524,7 @@ function redactRawResponse(value) {
     const redacted = {};
     Object.entries(value).forEach(([key, item]) => {
       if (key === "base64" && typeof item === "string") {
-        redacted[key] = `<image base64 omitted: ${item.length} chars>`;
+        redacted[key] = `<base64 omitted: ${item.length} chars>`;
       } else {
         redacted[key] = redactRawResponse(item);
       }

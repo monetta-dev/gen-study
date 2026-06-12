@@ -278,12 +278,18 @@ button:disabled {
   padding: 12px;
 }
 
-.visual-figure img {
-  display: block;
-  width: 100%;
-  height: auto;
+.tikz-source {
+  max-height: 420px;
+  overflow: auto;
+  margin: 0;
   background: #ffffff;
   border: 1px solid var(--line);
+  padding: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .visual-figure figcaption {

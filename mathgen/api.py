@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 from .agents import (
-    AdjudicatorAgent,
     ComplianceValidatorAgent,
     CriticalValidatorAgent,
     GeneratorAgent,
@@ -31,12 +30,10 @@ from .models import (
     ModelOutputError,
     VisualGenerateRequest,
 )
-from .openai_images import ImageGenerationError, OpenAIImageClient
 from .visual_agents import (
+    TikZGenerationAgent,
     VisualGenerationService,
     VisualInstructionAgent,
-    VisualRepairAgent,
-    VisualValidatorAgent,
 )
 
 VIEWER_ROOT = Path(__file__).resolve().parents[1] / "viewer"
@@ -49,13 +46,11 @@ def build_service(capture_trace: bool = False) -> MathGenerationService:
         capture=capture_trace,
     )
     generator_client = OpenCodeGoClient()
-    adjudicator_client = OpenCodeGoClient()
     repair_client = OpenCodeGoClient()
     critical_validator_client = OpenCodeGoClient()
     compliance_validator_client = OpenCodeGoClient()
     return MathGenerationService(
         generator=GeneratorAgent(generator_client, tracer=tracer),
-        adjudicator=AdjudicatorAgent(adjudicator_client, tracer=tracer),
         repair_agent=RepairAgent(repair_client, tracer=tracer),
         critical_validator=CriticalValidatorAgent(
             critical_validator_client, tracer=tracer
@@ -75,15 +70,15 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
         capture=capture_trace,
     )
     instruction_client = OpenCodeGoClient()
-    visual_validator_model = _env_string("VISUAL_VALIDATOR_MODEL") or "qwen3.7-plus"
-    validator_client = OpenCodeGoClient(model=visual_validator_model)
-    repair_client = OpenCodeGoClient(model=visual_validator_model)
+    tikz_model = (
+        _env_string("VISUAL_TIKZ_MODEL")
+        or _env_string("OPENCODE_GO_MODEL")
+        or "qwen3.7-max"
+    )
+    tikz_client = OpenCodeGoClient(model=tikz_model)
     return VisualGenerationService(
         instruction_agent=VisualInstructionAgent(instruction_client, tracer=tracer),
-        image_client=OpenAIImageClient(),
-        validator=VisualValidatorAgent(validator_client, tracer=tracer),
-        repair_agent=VisualRepairAgent(repair_client, tracer=tracer),
-        max_repair_attempts=_env_int("VISUAL_REPAIR_ATTEMPTS", 2),
+        tikz_agent=TikZGenerationAgent(tikz_client, tracer=tracer),
         tracer=tracer,
     )
 
@@ -233,18 +228,6 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
             return
         except ModelOutputError as exc:
             self._send_model_output_error(request_id, exc)
-            return
-        except ImageGenerationError as exc:
-            self._log_error(request_id, "image_generation_error", exc)
-            self._send_json(
-                HTTPStatus.BAD_GATEWAY,
-                {
-                    "status": "error",
-                    "error": "image_generation_error",
-                    "detail": str(exc),
-                    "request_id": request_id,
-                },
-            )
             return
         except json.JSONDecodeError:
             self._send_json_error(request_id)
