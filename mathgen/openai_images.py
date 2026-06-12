@@ -65,7 +65,7 @@ class OpenAIImageClient:
         self.timeout_seconds = timeout_seconds or _env_float(
             "OPENAI_IMAGE_TIMEOUT_SECONDS", 300.0
         )
-        self.retry_attempts = _env_int("OPENAI_IMAGE_RETRY_ATTEMPTS", 1)
+        self.retry_attempts = _env_int("OPENAI_IMAGE_RETRY_ATTEMPTS", 3)
         self.retry_delay_seconds = _env_float("OPENAI_IMAGE_RETRY_DELAY_SECONDS", 60.0)
 
     def generate_png_base64(self, prompt: str) -> str:

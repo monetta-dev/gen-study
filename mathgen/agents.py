@@ -146,7 +146,8 @@ def chat_json(
                     "Your previous response was not valid for this API contract. "
                     "Return only one strict JSON object matching exactly this shape: "
                     f"{expected_schema}. Do not include markdown fences, commentary, "
-                    "or any text outside the JSON object."
+                    "or any text outside the JSON object. Escape newlines inside "
+                    "string values as \\n."
                 ),
             },
         ]
@@ -247,6 +248,10 @@ Create one original Japanese university entrance exam {instruction["subject_name
 Use internal reasoning if available, but output only strict JSON.
 Write both the problem and solution in Japanese.
 The problem must be solvable within the {instruction["curriculum_scope"]}.
+Prioritize the requested difficulty level over the requested topic. Treat the topic as a loose anchor, not a narrow syllabus box: the problem may use the topic only as a small component if that better matches the requested level.
+If the topic is broad, vague, or "free", choose a problem whose difficulty, reasoning depth, and exam style best match the requested level.
+For elite levels such as University of Tokyo, Kyoto University, Waseda, or Keio, avoid routine one-step or template exercises. Use multi-step reasoning, non-obvious setup, synthesis of multiple high-school concepts, and concise exam-style wording without excessive guidance.
+Do not make the problem easier merely to keep the requested topic central.
 {instruction["constraints"]}
 Return exactly this JSON shape:
 {{"problem":"...","solution":"..."}}"""
@@ -272,11 +277,11 @@ Assume the problem and solution may be scientifically or mathematically correct.
 Evaluate this mandatory checklist:
 1. Curriculum Compliance: solvable without knowledge beyond the {instruction["curriculum_scope"]}.
 2. Japanese Output: the final problem and solution text are written in Japanese, with only mathematical notation, symbols, variable names, units, and standard terms left as needed.
-3. Subject and Topic Alignment: the problem matches the requested subject and topic.
-4. Level Alignment: the problem difficulty, complexity, and expected reasoning depth match the requested level. Reject if it is clearly too easy, too hard, or calibrated to a different exam level.
+3. Subject and Topic Alignment: the problem matches the requested subject. Treat the requested topic as a loose anchor; do not reject merely because the topic is only a small part of a broader high-quality problem.
+4. Level Alignment: the problem difficulty, complexity, and expected reasoning depth match the requested level. This is more important than strict topic centrality. Reject if it is clearly too easy, too hard, overly guided, routine, or calibrated to a different exam level.
 5. Text-only Policy: reject any problem that requires a diagram, graph, figure, structural drawing, image, or visual reference to solve.
 Before deciding, extract the required knowledge, concepts, laws, formulas, and mathematical methods used in the problem and solution. Judge whether each item is taught within the subject curriculum and prerequisite Japanese high school mathematics. Reject if solving requires any item outside that scope, even when the final answer is correct.
-High difficulty means harder combinations of high-school methods, not university-level subject knowledge or mathematics.
+High difficulty means harder combinations of high-school methods, not university-level subject knowledge or mathematics. For elite levels such as University of Tokyo, reject routine textbook exercises, single-formula substitutions, direct applications with excessive hints, or problems whose solution path is essentially immediate.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {{"passed":true|false,"curriculum_compliant":true|false,"issues":["..."]}}"""
@@ -286,10 +291,11 @@ def repair_system_prompt(subject: str) -> str:
     instruction = _subject_instruction(subject)
     return f"""You are RepairAgent, an independent {instruction["subject_name"]} revision specialist.
 Revise the existing problem and solution using the validator feedback and adjudicator guidance.
-Preserve the requested subject, topic, difficulty level, Japanese output, and overall intent.
+Preserve the requested subject, difficulty level, Japanese output, and overall intent. Preserve topic relevance when possible, but prioritize level calibration over keeping the topic central.
 Change only what is necessary to resolve the reported issues.
 Do not introduce university-level subject knowledge or mathematics.
 The repaired problem must remain solvable within the {instruction["curriculum_scope"]}.
+If the issue is that the problem is too easy for the requested level, increase depth through synthesis, hidden setup, or non-obvious reasoning rather than by adding out-of-curriculum knowledge.
 {instruction["constraints"]}
 Return exactly this JSON shape:
 {{"problem":"...","solution":"..."}}"""

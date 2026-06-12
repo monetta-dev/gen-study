@@ -59,6 +59,42 @@ class FakeStreamingAnthropicResponse:
         return iter(line.encode("utf-8") for line in lines)
 
 
+class FakeEmptyStreamingAnthropicResponse:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def __iter__(self):
+        lines = [
+            'event: message_start\n',
+            'data: {"type":"message_start","message":{"content":[]}}\n',
+            '\n',
+            'event: message_stop\n',
+            'data: {"type":"message_stop"}\n',
+        ]
+        return iter(line.encode("utf-8") for line in lines)
+
+
+class FakeContentBlockStartTextResponse:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def __iter__(self):
+        lines = [
+            'event: content_block_start\n',
+            'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"{\\"problem\\":\\"p\\",\\"solution\\":\\"s\\"}"}}\n',
+            '\n',
+            'event: message_stop\n',
+            'data: {"type":"message_stop"}\n',
+        ]
+        return iter(line.encode("utf-8") for line in lines)
+
+
 class OpenCodeGoClientTests(unittest.TestCase):
     def setUp(self):
         self.previous_env = {
@@ -153,6 +189,39 @@ class OpenCodeGoClientTests(unittest.TestCase):
             client.chat([{"role": "user", "content": "hello"}])
 
         self.assertNotIn("stream", captured["payload"])
+
+    def test_empty_anthropic_stream_retries_then_succeeds(self):
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(request.full_url)
+            if len(calls) == 1:
+                return FakeEmptyStreamingAnthropicResponse()
+            return FakeStreamingAnthropicResponse()
+
+        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
+        os.environ["OPENCODE_GO_MODEL"] = "qwen3.7-max"
+        os.environ["OPENCODE_GO_RETRY_ATTEMPTS"] = "1"
+        os.environ["OPENCODE_GO_RETRY_DELAY_SECONDS"] = "0"
+
+        client = OpenCodeGoClient()
+
+        with patch("urllib.request.urlopen", fake_urlopen):
+            content = client.chat([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(content, '{"problem":"p","solution":"s"}')
+        self.assertEqual(len(calls), 2)
+
+    def test_stream_reader_accepts_content_block_start_text(self):
+        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
+        os.environ["OPENCODE_GO_MODEL"] = "qwen3.7-max"
+
+        client = OpenCodeGoClient()
+
+        with patch("urllib.request.urlopen", lambda request, timeout: FakeContentBlockStartTextResponse()):
+            content = client.chat([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(content, '{"problem":"p","solution":"s"}')
 
     def test_anthropic_messages_preserve_multimodal_content_blocks(self):
         captured = {}

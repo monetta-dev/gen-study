@@ -35,6 +35,8 @@ class ViewerTests(unittest.TestCase):
         self.assertIn("generateVisuals", script)
         self.assertIn("renderVisualResponse", script)
         self.assertIn("renderTraceRecords", script)
+        self.assertIn("redactRawResponse", script)
+        self.assertIn("image base64 omitted", script)
         self.assertIn("trace: true", script)
         self.assertIn("visual_assets", script)
         self.assertIn("normalizeTextLatex", script)

@@ -35,6 +35,10 @@ class LLMError(RuntimeError):
     """Raised when the OpenCode Go API request fails."""
 
 
+class EmptyStreamError(LLMError):
+    """Raised when a streaming response completes without text content."""
+
+
 def _env_string(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
 
@@ -86,7 +90,7 @@ class OpenCodeGoClient:
         self.thinking_display = _env_string("OPENCODE_GO_THINKING_DISPLAY", "omitted").lower()
         self.thinking_enabled = _env_flag("OPENCODE_GO_THINKING_ENABLED", True)
         self.stream = _env_flag("OPENCODE_GO_STREAM", self.api_style == "anthropic")
-        self.retry_attempts = _env_int("OPENCODE_GO_RETRY_ATTEMPTS", 1)
+        self.retry_attempts = _env_int("OPENCODE_GO_RETRY_ATTEMPTS", 3)
         self.retry_delay_seconds = _env_float("OPENCODE_GO_RETRY_DELAY_SECONDS", 10.0)
         self.user_agent = _env_string("OPENCODE_GO_USER_AGENT", "gen-study/0.1 OpenCode Go client")
 
@@ -194,6 +198,16 @@ class OpenCodeGoClient:
                 time.sleep(delay)
             except urllib.error.URLError as exc:
                 raise LLMError(f"OpenCode Go request failed: {exc.reason}") from exc
+            except EmptyStreamError as exc:
+                if attempt >= self.retry_attempts:
+                    raise LLMError(str(exc)) from exc
+                print(
+                    f"Retrying streaming OpenCode Go {response_format} request after "
+                    f"empty text stream in {self.retry_delay_seconds:g}s "
+                    f"(attempt {attempt + 1}/{self.retry_attempts})",
+                    flush=True,
+                )
+                time.sleep(self.retry_delay_seconds)
             except (http.client.HTTPException, TimeoutError, OSError) as exc:
                 raise LLMError(f"OpenCode Go connection failed: {exc}") from exc
         raise LLMError("OpenCode Go streaming request failed")
@@ -238,12 +252,16 @@ class OpenCodeGoClient:
                 error = event.get("error", {})
                 message = error.get("message") or json.dumps(error, ensure_ascii=False)
                 raise LLMError(f"OpenCode Go streaming error: {message}")
+            if event.get("type") == "content_block_start":
+                block = event.get("content_block")
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text_parts.append(block.get("text", ""))
             delta = event.get("delta")
             if isinstance(delta, dict) and delta.get("type") == "text_delta":
                 text_parts.append(delta.get("text", ""))
         text = "".join(text_parts)
         if not text:
-            raise LLMError("OpenCode Go streaming response did not include text content")
+            raise EmptyStreamError("OpenCode Go streaming response did not include text content")
         return text
 
     def _anthropic_system_prompt(self, messages: list[dict[str, Any]]) -> str:

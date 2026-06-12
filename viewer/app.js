@@ -356,7 +356,7 @@ async function typeset() {
 }
 
 async function renderResponse(data) {
-  rawOutput.textContent = JSON.stringify({ text: data, visual: currentVisualResponse }, null, 2);
+  renderRawResponse({ text: data, visual: currentVisualResponse });
 
   if (data.status === "success") {
     currentTextResponse = data;
@@ -488,7 +488,7 @@ async function generateVisuals() {
     }
     renderVisualResponse(data);
     renderTraceRecords(data.trace, "Visual Generation", true);
-    rawOutput.textContent = JSON.stringify({ text: currentTextResponse, visual: data }, null, 2);
+    renderRawResponse({ text: currentTextResponse, visual: data });
     if (!response.ok && data.status !== "failed") {
       setStatus(data.detail || data.error || "Visual generation failed.", "error");
       return;
@@ -510,6 +510,28 @@ function loadSample() {
   resetVisualOutput();
   resetProcessOutput();
   renderResponse(sampleResponse);
+}
+
+function renderRawResponse(value) {
+  rawOutput.textContent = JSON.stringify(redactRawResponse(value), null, 2);
+}
+
+function redactRawResponse(value) {
+  if (Array.isArray(value)) {
+    return value.map(redactRawResponse);
+  }
+  if (value && typeof value === "object") {
+    const redacted = {};
+    Object.entries(value).forEach(([key, item]) => {
+      if (key === "base64" && typeof item === "string") {
+        redacted[key] = `<image base64 omitted: ${item.length} chars>`;
+      } else {
+        redacted[key] = redactRawResponse(item);
+      }
+    });
+    return redacted;
+  }
+  return value;
 }
 
 apiUrlInput.value = defaultApiUrl();

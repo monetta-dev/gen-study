@@ -63,8 +63,13 @@ class AgentTests(unittest.TestCase):
         compliance_system_prompt = compliance_validator_client.messages[0][0]["content"]
         self.assertIn("Write both the problem and solution in Japanese", generator_system_prompt)
         self.assertIn('{"problem":"...","solution":"..."}', generator_system_prompt)
+        self.assertIn("Prioritize the requested difficulty level", generator_system_prompt)
+        self.assertIn("topic as a loose anchor", generator_system_prompt)
+        self.assertIn("Do not make the problem easier", generator_system_prompt)
         self.assertIn("Japanese Output", compliance_system_prompt)
         self.assertIn("Text-only Policy", compliance_system_prompt)
+        self.assertIn("more important than strict topic centrality", compliance_system_prompt)
+        self.assertIn("reject routine textbook exercises", compliance_system_prompt)
         self.assertIn("Subject: mathematics", generator_client.messages[0][1]["content"])
 
     def test_generator_retries_once_after_invalid_json(self):
@@ -161,7 +166,9 @@ class AgentTests(unittest.TestCase):
         repair_system_prompt = repair_client.messages[0][0]["content"]
         repair_payload = repair_client.messages[0][1]["content"]
         self.assertIn("RepairAgent", repair_system_prompt)
-        self.assertIn("Preserve the requested subject, topic, difficulty level", repair_system_prompt)
+        self.assertIn("Preserve the requested subject, difficulty level", repair_system_prompt)
+        self.assertIn("prioritize level calibration", repair_system_prompt)
+        self.assertIn("too easy for the requested level", repair_system_prompt)
         self.assertIn("Change only what is necessary", repair_system_prompt)
         self.assertIn('"validation_stage": "critical"', repair_payload)
         self.assertIn('"adjudicator_decision": "repair_required"', repair_payload)

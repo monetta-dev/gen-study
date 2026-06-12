@@ -22,7 +22,7 @@ Requests containing `allow_visuals` or `allow_diagram` are rejected by this API.
 - Optional visual API setting: `OPENAI_IMAGE_SIZE`; blank means omitted
 - Optional visual API setting: `OPENAI_IMAGE_QUALITY`; blank means omitted
 - Optional visual API setting: `OPENAI_IMAGE_N`; blank means omitted
-- Optional visual API setting: `OPENAI_IMAGE_RETRY_ATTEMPTS`, defaults to `1`
+- Optional visual API setting: `OPENAI_IMAGE_RETRY_ATTEMPTS`, defaults to `3`
 - Optional visual API setting: `OPENAI_IMAGE_RETRY_DELAY_SECONDS`, defaults to `60`
 - Optional visual API setting: `VISUAL_REPAIR_ATTEMPTS`, defaults to `2`
 - Optional: `OPENCODE_GO_BASE_URL`, defaults to `https://opencode.ai/zen/go/v1`
@@ -33,7 +33,7 @@ Requests containing `allow_visuals` or `allow_diagram` are rejected by this API.
 - Optional: `OPENCODE_GO_THINKING_ENABLED`, defaults to `true`
 - Optional: `OPENCODE_GO_THINKING_BUDGET_TOKENS`, defaults to `16384`
 - Optional: `OPENCODE_GO_THINKING_DISPLAY`, defaults to `omitted`
-- Optional: `OPENCODE_GO_RETRY_ATTEMPTS`, defaults to `1`
+- Optional: `OPENCODE_GO_RETRY_ATTEMPTS`, defaults to `3`
 - Optional: `OPENCODE_GO_RETRY_DELAY_SECONDS`, defaults to `10`
 - Optional: `MAX_REPAIR_ATTEMPTS`; blank means no hard repair limit
 - Optional: `GENERATION_TRACE`, defaults to `false`
@@ -64,14 +64,14 @@ OPENCODE_GO_STREAM=true
 OPENCODE_GO_TIMEOUT_SECONDS=300
 OPENCODE_GO_THINKING_ENABLED=true
 OPENCODE_GO_THINKING_DISPLAY=omitted
-OPENCODE_GO_RETRY_ATTEMPTS=1
+OPENCODE_GO_RETRY_ATTEMPTS=3
 OPENCODE_GO_RETRY_DELAY_SECONDS=10
 OPENAI_API_KEY=your_openai_api_key_here
 OPENAI_IMAGE_MODEL=gpt-image-2
 OPENAI_IMAGE_SIZE=
 OPENAI_IMAGE_QUALITY=
 OPENAI_IMAGE_N=
-OPENAI_IMAGE_RETRY_ATTEMPTS=1
+OPENAI_IMAGE_RETRY_ATTEMPTS=3
 OPENAI_IMAGE_RETRY_DELAY_SECONDS=60
 VISUAL_REPAIR_ATTEMPTS=2
 MAX_REPAIR_ATTEMPTS=
@@ -181,7 +181,7 @@ OPENAI_IMAGE_MODEL=gpt-image-2
 OPENAI_IMAGE_SIZE=
 OPENAI_IMAGE_QUALITY=
 OPENAI_IMAGE_N=
-OPENAI_IMAGE_RETRY_ATTEMPTS=1
+OPENAI_IMAGE_RETRY_ATTEMPTS=3
 OPENAI_IMAGE_RETRY_DELAY_SECONDS=60
 VISUAL_REPAIR_ATTEMPTS=2
 ```
