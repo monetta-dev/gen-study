@@ -12,7 +12,7 @@ import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .agents import (
     ComplianceValidatorAgent,
@@ -41,16 +41,19 @@ from .visual_agents import (
 VIEWER_ROOT = Path(__file__).resolve().parents[1] / "viewer"
 
 
-def build_service(capture_trace: bool = False) -> MathGenerationService:
+def build_service(
+    capture_trace: bool = False,
+    progress: Callable[[str], None] | None = None,
+) -> MathGenerationService:
     load_dotenv()
     tracer = InteractionTracer(
         enabled=_env_flag("GENERATION_TRACE"),
         capture=capture_trace,
     )
-    generator_client = OpenCodeGoClient()
-    repair_client = OpenCodeGoClient()
-    critical_validator_client = OpenCodeGoClient()
-    compliance_validator_client = OpenCodeGoClient()
+    generator_client = _opencode_client_for_role("GENERATOR")
+    repair_client = _opencode_client_for_role("REPAIR")
+    critical_validator_client = _opencode_client_for_role("CRITICAL_VALIDATOR")
+    compliance_validator_client = _opencode_client_for_role("COMPLIANCE_VALIDATOR")
     return MathGenerationService(
         generator=GeneratorAgent(generator_client, tracer=tracer),
         repair_agent=RepairAgent(repair_client, tracer=tracer),
@@ -62,24 +65,32 @@ def build_service(capture_trace: bool = False) -> MathGenerationService:
         ),
         max_repair_attempts=_env_optional_int("MAX_REPAIR_ATTEMPTS"),
         tracer=tracer,
+        progress=progress,
     )
 
 
-def build_visual_service(capture_trace: bool = False) -> VisualGenerationService:
+def build_visual_service(
+    capture_trace: bool = False,
+    progress: Callable[[str], None] | None = None,
+) -> VisualGenerationService:
     load_dotenv()
     tracer = InteractionTracer(
         enabled=_env_flag("GENERATION_TRACE"),
         capture=capture_trace,
     )
-    instruction_client = OpenCodeGoClient()
+    instruction_client = _opencode_client_for_role("VISUAL_INSTRUCTION")
     tikz_model = (
         _env_string("VISUAL_TIKZ_MODEL")
         or _env_string("OPENCODE_GO_MODEL")
         or "qwen3.7-max"
     )
-    tikz_client = OpenCodeGoClient(model=tikz_model)
-    tikz_validator_client = OpenCodeGoClient(model=tikz_model)
-    tikz_repair_client = OpenCodeGoClient(model=tikz_model)
+    tikz_client = _opencode_client_for_role("VISUAL_TIKZ", default_model=tikz_model)
+    tikz_validator_client = _opencode_client_for_role(
+        "VISUAL_TIKZ_VALIDATOR", default_model=tikz_model
+    )
+    tikz_repair_client = _opencode_client_for_role(
+        "VISUAL_TIKZ_REPAIR", default_model=tikz_model
+    )
     return VisualGenerationService(
         instruction_agent=VisualInstructionAgent(instruction_client, tracer=tracer),
         tikz_agent=TikZGenerationAgent(tikz_client, tracer=tracer),
@@ -87,6 +98,21 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
         tikz_repair_agent=TikZRepairAgent(tikz_repair_client, tracer=tracer),
         max_repair_attempts=_env_int("VISUAL_TIKZ_REPAIR_ATTEMPTS", 2),
         tracer=tracer,
+        progress=progress,
+    )
+
+
+def _opencode_client_for_role(
+    role: str,
+    default_model: str | None = None,
+) -> OpenCodeGoClient:
+    model = _env_string(f"{role}_MODEL") or default_model or None
+    return OpenCodeGoClient(
+        model=model,
+        max_tokens=_env_optional_int(f"{role}_MAX_TOKENS"),
+        thinking_budget_tokens=_env_optional_int(f"{role}_THINKING_BUDGET_TOKENS"),
+        thinking_enabled=_env_optional_flag(f"{role}_THINKING_ENABLED"),
+        stream=_env_optional_flag(f"{role}_STREAM"),
     )
 
 
@@ -118,6 +144,13 @@ def _env_optional_int(name: str) -> int | None:
     if parsed < 0:
         raise ContractError(f"`{name}` must be non-negative")
     return parsed
+
+
+def _env_optional_flag(name: str) -> bool | None:
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        return None
+    return value in {"1", "true", "yes", "on"}
 
 
 def _env_string(name: str, default: str = "") -> str:
@@ -168,6 +201,12 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         request_id = uuid.uuid4().hex[:12]
+        if self.path == "/generate/stream":
+            self._handle_generate_stream(request_id)
+            return
+        if self.path == "/visuals/generate/stream":
+            self._handle_visual_generate_stream(request_id)
+            return
         if self.path == "/generate":
             self._handle_generate(request_id)
             return
@@ -209,6 +248,78 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
 
         status = HTTPStatus.OK if result.get("status") == "success" else HTTPStatus.UNPROCESSABLE_ENTITY
         self._send_json(status, result)
+
+    def _handle_visual_generate_stream(self, request_id: str) -> None:
+        if not self._is_authorized():
+            self._send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"status": "error", "error": "unauthorized"},
+            )
+            return
+
+        self._start_event_stream()
+
+        def progress(message: str) -> None:
+            self._send_stream_event({"type": "progress", "message": message})
+
+        try:
+            payload = self._read_json_body()
+            include_trace = _payload_trace_enabled(payload)
+            request = VisualGenerateRequest.from_dict(payload)
+            service = self.visual_service or build_visual_service(
+                capture_trace=include_trace,
+                progress=progress,
+            )
+            result = service.generate_visual(request)
+            self._attach_trace(result, service, include_trace)
+            self._send_stream_event({"type": "result", "data": result})
+        except ContractError as exc:
+            self._stream_error(request_id, "invalid_request", str(exc), HTTPStatus.BAD_REQUEST, exc)
+        except LLMError as exc:
+            self._stream_error(request_id, "llm_api_error", str(exc), HTTPStatus.BAD_GATEWAY, exc)
+        except ModelOutputError as exc:
+            self._stream_error(request_id, "llm_output_error", str(exc), HTTPStatus.BAD_GATEWAY, exc)
+        except json.JSONDecodeError:
+            self._stream_error(request_id, "invalid_json", "Invalid JSON request body", HTTPStatus.BAD_REQUEST)
+        except Exception as exc:
+            detail = str(exc) if self.debug_tracebacks else "Unexpected server error"
+            self._stream_error(request_id, "internal_server_error", detail, HTTPStatus.INTERNAL_SERVER_ERROR, exc)
+
+    def _handle_generate_stream(self, request_id: str) -> None:
+        if not self._is_authorized():
+            self._send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"status": "error", "error": "unauthorized"},
+            )
+            return
+
+        self._start_event_stream()
+
+        def progress(message: str) -> None:
+            self._send_stream_event({"type": "progress", "message": message})
+
+        try:
+            payload = self._read_json_body()
+            include_trace = _payload_trace_enabled(payload)
+            request = GenerateRequest.from_dict(payload)
+            service = self.service or build_service(
+                capture_trace=include_trace,
+                progress=progress,
+            )
+            result = service.generate_verified(request)
+            self._attach_trace(result, service, include_trace)
+            self._send_stream_event({"type": "result", "data": result})
+        except ContractError as exc:
+            self._stream_error(request_id, "invalid_request", str(exc), HTTPStatus.BAD_REQUEST, exc)
+        except LLMError as exc:
+            self._stream_error(request_id, "llm_api_error", str(exc), HTTPStatus.BAD_GATEWAY, exc)
+        except ModelOutputError as exc:
+            self._stream_error(request_id, "llm_output_error", str(exc), HTTPStatus.BAD_GATEWAY, exc)
+        except json.JSONDecodeError:
+            self._stream_error(request_id, "invalid_json", "Invalid JSON request body", HTTPStatus.BAD_REQUEST)
+        except Exception as exc:
+            detail = str(exc) if self.debug_tracebacks else "Unexpected server error"
+            self._stream_error(request_id, "internal_server_error", detail, HTTPStatus.INTERNAL_SERVER_ERROR, exc)
 
     def _handle_visual_generate(self, request_id: str) -> None:
         if not self._is_authorized():
@@ -366,6 +477,44 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             if self.debug_tracebacks:
                 self.log_message("client disconnected before response could be sent")
+
+    def _start_event_stream(self) -> None:
+        self.send_response(HTTPStatus.OK)
+        self._send_cors_headers()
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+
+    def _send_stream_event(self, payload: dict[str, Any]) -> None:
+        try:
+            self.wfile.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            self.wfile.write(b"\n")
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            if self.debug_tracebacks:
+                self.log_message("client disconnected during event stream")
+
+    def _stream_error(
+        self,
+        request_id: str,
+        error: str,
+        detail: str,
+        status: HTTPStatus,
+        exc: BaseException | None = None,
+    ) -> None:
+        self._log_error(request_id, error, exc)
+        self._send_stream_event(
+            {
+                "type": "result",
+                "data": {
+                    "status": "error",
+                    "error": error,
+                    "detail": detail,
+                    "request_id": request_id,
+                    "http_status": int(status),
+                },
+            }
+        )
 
     def _send_static(self) -> None:
         path = self.path.split("?", 1)[0]

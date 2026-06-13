@@ -94,6 +94,16 @@ function defaultVisualApiUrl() {
   return "http://127.0.0.1:8000/visuals/generate";
 }
 
+function streamUrlFor(apiUrl) {
+  if (apiUrl.endsWith("/generate")) {
+    return `${apiUrl}/stream`;
+  }
+  if (apiUrl.endsWith("/visuals/generate")) {
+    return `${apiUrl}/stream`;
+  }
+  return "";
+}
+
 function setTopicOptions(subject) {
   const topicOptions = document.getElementById("topicOptions");
   clearNode(topicOptions);
@@ -438,22 +448,12 @@ async function generateProblem(event) {
   resetProcessOutput("Generating...");
 
   try {
-    const response = await fetch(apiUrlInput.value.trim(), {
-      method: "POST",
+    const data = await fetchJsonOrStream(
+      apiUrlInput.value.trim(),
       headers,
-      body: JSON.stringify(payload)
-    });
-    const text = await response.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (error) {
-      throw new Error(`API returned non-JSON response: ${text.slice(0, 160)}`);
-    }
-    if (!response.ok && data.status !== "failed") {
-      await renderResponse(data);
-      return;
-    }
+      payload,
+      "API"
+    );
     await renderResponse(data);
     if (data.status === "success" && autoVisualInput.checked) {
       await generateVisuals();
@@ -502,25 +502,15 @@ async function generateVisuals() {
   resetVisualOutput("Generating visuals...");
 
   try {
-    const response = await fetch(visualApiUrlInput.value.trim(), {
-      method: "POST",
+    const data = await fetchJsonOrStream(
+      visualApiUrlInput.value.trim(),
       headers,
-      body: JSON.stringify(payload)
-    });
-    const text = await response.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (error) {
-      throw new Error(`Visual API returned non-JSON response: ${text.slice(0, 160)}`);
-    }
+      payload,
+      "Visual API"
+    );
     renderVisualResponse(data);
     renderTraceRecords(data.trace, "Visual Generation", true);
     renderRawResponse(configFlag("showFullRawResponse") ? { text: currentTextResponse, visual: data } : currentTextResponse);
-    if (!response.ok && data.status !== "failed") {
-      setStatus(data.detail || data.error || "Visual generation failed.", "error");
-      return;
-    }
     if (data.status === "success") {
       setStatus("Visual generation completed.", "ok");
     } else {
@@ -530,6 +520,96 @@ async function generateVisuals() {
     setStatus(error.message, "error");
   } finally {
     setVisualLoading(false);
+  }
+}
+
+async function fetchJsonOrStream(apiUrl, headers, payload, label) {
+  if (configFlag("streamProgress", true)) {
+    const streamUrl = streamUrlFor(apiUrl);
+    if (streamUrl && window.ReadableStream) {
+      try {
+        return await fetchStreamedResult(streamUrl, headers, payload, label);
+      } catch (error) {
+        setStatus(`${error.message} Retrying without progress stream.`, "error");
+      }
+    }
+  }
+  return fetchJsonResult(apiUrl, headers, payload, label);
+}
+
+async function fetchJsonResult(apiUrl, headers, payload, label) {
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload)
+  });
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${label} returned non-JSON response: ${text.slice(0, 160)}`);
+  }
+  return data;
+}
+
+async function fetchStreamedResult(apiUrl, headers, payload, label) {
+  const response = await fetch(apiUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload)
+  });
+  if (!response.body) {
+    throw new Error(`${label} progress stream is unavailable.`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalData = null;
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\n/);
+    buffer = lines.pop() || "";
+    lines.forEach((line) => {
+      const event = parseStreamEvent(line, label);
+      if (!event) {
+        return;
+      }
+      if (event.type === "progress" && event.message) {
+        setStatus(event.message, "");
+      }
+      if (event.type === "result") {
+        finalData = event.data;
+      }
+    });
+  }
+
+  buffer += decoder.decode();
+  const trailingEvent = parseStreamEvent(buffer, label);
+  if (trailingEvent && trailingEvent.type === "result") {
+    finalData = trailingEvent.data;
+  }
+  if (!finalData) {
+    throw new Error(`${label} progress stream ended without a final result.`);
+  }
+  return finalData;
+}
+
+function parseStreamEvent(line, label) {
+  const text = String(line || "").trim();
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${label} returned an invalid progress event: ${text.slice(0, 120)}`);
   }
 }
 

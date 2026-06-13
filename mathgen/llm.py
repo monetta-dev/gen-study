@@ -79,17 +79,33 @@ class OpenCodeGoClient:
         base_url: str | None = None,
         model: str | None = None,
         timeout_seconds: float | None = None,
+        max_tokens: int | None = None,
+        thinking_budget_tokens: int | None = None,
+        thinking_enabled: bool | None = None,
+        stream: bool | None = None,
     ) -> None:
         self.api_key = api_key or _env_string("OPENCODE_GO_API_KEY")
         self.base_url = (base_url or _env_string("OPENCODE_GO_BASE_URL", OPENCODE_GO_BASE_URL)).rstrip("/")
         self.model = model or _env_string("OPENCODE_GO_MODEL", "qwen3.7-max")
         self.timeout_seconds = timeout_seconds or _env_float("OPENCODE_GO_TIMEOUT_SECONDS", 300.0)
         self.api_style = self._resolve_api_style()
-        self.max_tokens = _env_int("OPENCODE_GO_MAX_TOKENS", 32768)
-        self.thinking_budget_tokens = _env_int("OPENCODE_GO_THINKING_BUDGET_TOKENS", 16384)
+        self.max_tokens = max_tokens or _env_int("OPENCODE_GO_MAX_TOKENS", 32768)
+        self.thinking_budget_tokens = (
+            thinking_budget_tokens
+            if thinking_budget_tokens is not None
+            else _env_int("OPENCODE_GO_THINKING_BUDGET_TOKENS", 16384)
+        )
         self.thinking_display = _env_string("OPENCODE_GO_THINKING_DISPLAY", "omitted").lower()
-        self.thinking_enabled = _env_flag("OPENCODE_GO_THINKING_ENABLED", True)
-        self.stream = _env_flag("OPENCODE_GO_STREAM", self.api_style == "anthropic")
+        self.thinking_enabled = (
+            thinking_enabled
+            if thinking_enabled is not None
+            else _env_flag("OPENCODE_GO_THINKING_ENABLED", True)
+        )
+        self.stream = (
+            stream
+            if stream is not None
+            else _env_flag("OPENCODE_GO_STREAM", self.api_style == "anthropic")
+        )
         self.retry_attempts = _env_int("OPENCODE_GO_RETRY_ATTEMPTS", 3)
         self.retry_delay_seconds = _env_float("OPENCODE_GO_RETRY_DELAY_SECONDS", 10.0)
         self.user_agent = _env_string("OPENCODE_GO_USER_AGENT", "gen-study/0.1 OpenCode Go client")

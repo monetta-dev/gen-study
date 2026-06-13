@@ -30,6 +30,10 @@ containing `allow_visuals` or `allow_diagram` are rejected.
 - Optional: `OPENCODE_GO_THINKING_DISPLAY`, defaults to `omitted`
 - Optional: `OPENCODE_GO_RETRY_ATTEMPTS`, defaults to `3`
 - Optional: `OPENCODE_GO_RETRY_DELAY_SECONDS`, defaults to `10`
+- Optional narrow-agent overrides such as `COMPLIANCE_VALIDATOR_MODEL`,
+  `COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS`,
+  `VISUAL_INSTRUCTION_MODEL`, and `VISUAL_TIKZ_VALIDATOR_MODEL`; blank means
+  use the main model and thinking settings
 - Optional: `MAX_REPAIR_ATTEMPTS`; blank means no hard repair limit
 - Optional: `GENERATION_TRACE`, defaults to `false`
 - Optional: `API_HOST`, defaults to `127.0.0.1`
@@ -68,6 +72,12 @@ OPENCODE_GO_ANTHROPIC_VERSION=2023-06-01
 OPENCODE_GO_USER_AGENT=gen-study/0.1 OpenCode Go client
 OPENCODE_GO_RETRY_ATTEMPTS=3
 OPENCODE_GO_RETRY_DELAY_SECONDS=10
+COMPLIANCE_VALIDATOR_MODEL=
+COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS=
+VISUAL_INSTRUCTION_MODEL=
+VISUAL_INSTRUCTION_THINKING_BUDGET_TOKENS=
+VISUAL_TIKZ_VALIDATOR_MODEL=
+VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS=
 MAX_REPAIR_ATTEMPTS=
 GENERATION_TRACE=false
 API_HOST=127.0.0.1
@@ -143,6 +153,13 @@ Thinking is sent as:
 `OPENCODE_GO_MAX_TOKENS`. These are optional advanced overrides; the defaults
 are intentionally high now that streaming avoids the Cloudflare read-timeout
 problem.
+
+Role-specific model and thinking overrides are supported for narrow sub-agents.
+For example, you can set `COMPLIANCE_VALIDATOR_MODEL=qwen3.7-plus` or
+`VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS=4096`. Leave these blank to keep
+the main high-quality model and thinking budget everywhere. The generator,
+repair agent, and critical validator should generally stay on the strongest
+settings unless you have tested quality carefully.
 
 OpenCode Go models currently handled as Anthropic-compatible `/messages`:
 
@@ -231,7 +248,11 @@ Each generation attempt is checked by two focused validators:
 1. `CriticalValidator` checks genuine correctness issues: calculation errors, invalid equations, unit errors, logical gaps, contradictions, missing conditions, and problem/solution inconsistencies.
 2. `ComplianceValidator` checks system acceptance: Japanese curriculum scope, Japanese output, subject/topic alignment, requested level alignment, and text-only policy.
 
-When either validator rejects a candidate, `RepairAgent` receives the same candidate plus the validator issues and revises it directly. Validation then runs again. By default there is no hard repair limit; set `MAX_REPAIR_ATTEMPTS` to a non-negative integer if you need a production cost guardrail.
+The two validators run in parallel because they are independent. When either
+validator rejects a candidate, `RepairAgent` receives the same candidate plus
+the validator issues and revises it directly. Validation then runs again. By
+default there is no hard repair limit; set `MAX_REPAIR_ATTEMPTS` to a
+non-negative integer if you need a production cost guardrail.
 
 ## Request
 
@@ -241,6 +262,17 @@ curl -X POST http://127.0.0.1:8000/generate \
   -d '{"subject":"mathematics","level":"University of Tokyo","topic":"Probability Recurrence Relations"}'
 ```
 
+For GUI-style progress updates, use the newline-delimited JSON stream endpoint:
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/generate/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"subject":"mathematics","level":"University of Tokyo","topic":"free"}'
+```
+
+It emits `progress` events and ends with a `result` event containing the same
+final response shape as `POST /generate`.
+
 Generate a visual asset from a completed problem and solution:
 
 ```bash
@@ -248,6 +280,8 @@ curl -X POST http://127.0.0.1:8000/visuals/generate \
   -H 'Content-Type: application/json' \
   -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics","problem":"問題文...","solution":"解答..."}'
 ```
+
+The matching progress endpoint is `POST /visuals/generate/stream`.
 
 If visuals are needed, the response includes one or more TikZ assets:
 

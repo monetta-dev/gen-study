@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Protocol, TypeVar
 
 from .json_utils import parse_json_object
@@ -42,6 +44,7 @@ class InteractionTracer:
         self.writer = writer or sys.stdout
         self.capture = capture
         self.records: list[str] = []
+        self._lock = threading.Lock()
 
     def log_request(self, agent_name: str, messages: list[dict[str, Any]]) -> None:
         if not self.enabled and not self.capture:
@@ -101,14 +104,16 @@ class InteractionTracer:
         self._write(f"=== Final result: status={result.get('status')} ===\n")
 
     def to_response(self) -> list[str]:
-        return list(self.records)
+        with self._lock:
+            return list(self.records)
 
     def _write(self, text: str) -> None:
-        if self.capture:
-            self.records.append(text)
-        if self.enabled:
-            self.writer.write(f"{text}\n")
-            self.writer.flush()
+        with self._lock:
+            if self.capture:
+                self.records.append(text)
+            if self.enabled:
+                self.writer.write(f"{text}\n")
+                self.writer.flush()
 
 
 T = TypeVar("T")
@@ -447,6 +452,7 @@ class MathGenerationService:
         compliance_validator: ComplianceValidatorAgent,
         max_repair_attempts: int | None = None,
         tracer: InteractionTracer | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> None:
         if max_repair_attempts is not None and max_repair_attempts < 0:
             raise ValueError("max_repair_attempts must be at least 0")
@@ -456,16 +462,21 @@ class MathGenerationService:
         self.compliance_validator = compliance_validator
         self.max_repair_attempts = max_repair_attempts
         self.tracer = tracer or InteractionTracer()
+        self.progress = progress
 
     def generate_verified(self, request: GenerateRequest) -> dict[str, object]:
         last_validation: ValidationResult | None = None
 
         self.tracer.log_attempt(1, request)
+        self._progress("Generating problem and solution.")
         generated = self.generator.generate(request)
 
         repair_count = 0
         while True:
-            critical_validation = self.critical_validator.validate(request, generated)
+            self._progress("Validating correctness and curriculum compliance.")
+            critical_validation, compliance_validation = self._validate_parallel(
+                request, generated
+            )
             if not critical_validation.passed:
                 last_validation = ValidationResult(
                     passed=False,
@@ -485,9 +496,9 @@ class MathGenerationService:
                 repair_count += 1
                 continue
 
-            compliance_validation = self.compliance_validator.validate(request, generated)
             if compliance_validation.passed:
                 result = generated.to_success_response()
+                self._progress("Generation completed.")
                 self.tracer.log_final_result(result)
                 return result
             last_validation = ValidationResult(
@@ -509,8 +520,21 @@ class MathGenerationService:
 
         assert last_validation is not None
         result = last_validation.to_failure_response()
+        self._progress("Generation failed validation.")
         self.tracer.log_final_result(result)
         return result
+
+    def _validate_parallel(
+        self, request: GenerateRequest, generated: GeneratedProblem
+    ) -> tuple[CriticalValidationResult, ComplianceValidationResult]:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            critical_future = executor.submit(
+                self.critical_validator.validate, request, generated
+            )
+            compliance_future = executor.submit(
+                self.compliance_validator.validate, request, generated
+            )
+            return critical_future.result(), compliance_future.result()
 
     def _repair_or_finish(
         self,
@@ -523,7 +547,12 @@ class MathGenerationService:
         if self.max_repair_attempts is not None and repair_count >= self.max_repair_attempts:
             return None
         next_attempt = repair_count + 1
+        self._progress(f"Repairing candidate after {validation_stage} validation.")
         self.tracer.log_repair_attempt(next_attempt, validation_stage, issues)
         return self.repair_agent.repair(
             request, generated, validation_stage, issues
         )
+
+    def _progress(self, message: str) -> None:
+        if self.progress is not None:
+            self.progress(message)

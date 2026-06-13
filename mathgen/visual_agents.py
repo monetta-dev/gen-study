@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Protocol
+from typing import Callable, Protocol
 
 from .agents import InteractionTracer, chat_json
 from .models import (
@@ -226,6 +226,7 @@ class VisualGenerationService:
         tikz_repair_agent: TikZRepairAgent,
         max_repair_attempts: int = 2,
         tracer: InteractionTracer | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> None:
         if max_repair_attempts < 0:
             raise ValueError("max_repair_attempts must be at least 0")
@@ -235,10 +236,13 @@ class VisualGenerationService:
         self.tikz_repair_agent = tikz_repair_agent
         self.max_repair_attempts = max_repair_attempts
         self.tracer = tracer or InteractionTracer()
+        self.progress = progress
 
     def generate_visual(self, request: VisualGenerateRequest) -> dict[str, object]:
+        self._progress("Planning required visuals.")
         instruction_set = self.instruction_agent.create_instruction(request)
         if not instruction_set.needed:
+            self._progress("No visual was needed.")
             return {
                 "status": "success",
                 "visual_needed": False,
@@ -251,12 +255,14 @@ class VisualGenerationService:
         validations: list[dict[str, object]] = []
         validation_statuses: list[str] = []
         for instruction in instruction_set.visuals:
+            self._progress(f"Generating TikZ for {instruction.visual_id}.")
             result = self._generate_one_tikz_visual(request, instruction)
             attempts.extend(result["attempts"])
             validations.append(result["validation"])
             visual_assets.append(result["asset"])
             validation_statuses.append(str(result["validation_status"]))
             if result["status"] == "failed":
+                self._progress(f"TikZ validation failed for {instruction.visual_id}.")
                 return {
                     "status": "failed",
                     "reason": "tikz_validator_rejected",
@@ -269,6 +275,7 @@ class VisualGenerationService:
                     "attempts": attempts,
                 }
 
+        self._progress("Visual generation completed.")
         return {
             "status": "success",
             "visual_needed": True,
@@ -294,6 +301,7 @@ class VisualGenerationService:
         ]
         repair_count = 0
         while True:
+            self._progress(f"Validating TikZ for {instruction.visual_id}.")
             validation = self.tikz_validator.validate_tikz(
                 request, instruction, tikz_source
             )
@@ -326,6 +334,7 @@ class VisualGenerationService:
                     "validation_status": "failed",
                 }
 
+            self._progress(f"Repairing TikZ for {instruction.visual_id}.")
             tikz_source = self.tikz_repair_agent.repair_tikz(
                 request, instruction, tikz_source, validation.issues
             )
@@ -338,6 +347,10 @@ class VisualGenerationService:
                     "tikz_source": tikz_source,
                 }
             )
+
+    def _progress(self, message: str) -> None:
+        if self.progress is not None:
+            self.progress(message)
 
 
 def _tikz_context(

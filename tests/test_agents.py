@@ -1,5 +1,6 @@
 from io import StringIO
 import json
+import time
 import unittest
 
 from mathgen.agents import (
@@ -39,6 +40,7 @@ class AgentTests(unittest.TestCase):
         )
         compliance_validator_client = FakeClient(
             [
+                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
                 '{"passed":true,"curriculum_compliant":true,"issues":[]}',
             ]
         )
@@ -138,6 +140,7 @@ class AgentTests(unittest.TestCase):
         compliance_validator_client = FakeClient(
             [
                 '{"passed":true,"curriculum_compliant":true,"issues":[]}',
+                '{"passed":true,"curriculum_compliant":true,"issues":[]}',
             ]
         )
         service = MathGenerationService(
@@ -186,7 +189,14 @@ class AgentTests(unittest.TestCase):
             GeneratorAgent(generator_client),
             RepairAgent(repair_client),
             CriticalValidatorAgent(critical_validator_client),
-            ComplianceValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(
+                FakeClient(
+                    [
+                        '{"passed":true,"curriculum_compliant":true,"issues":[]}',
+                        '{"passed":true,"curriculum_compliant":true,"issues":[]}',
+                    ]
+                )
+            ),
             max_repair_attempts=1,
         )
 
@@ -197,6 +207,32 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(result["issues"], ["still wrong"])
         self.assertEqual(len(generator_client.messages), 1)
         self.assertEqual(len(repair_client.messages), 1)
+
+    def test_independent_validators_run_in_parallel(self):
+        class SlowFakeClient(FakeClient):
+            def chat(self, messages):
+                time.sleep(0.2)
+                return super().chat(messages)
+
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient(['{"problem":"問","solution":"解"}'])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(
+                SlowFakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
+            ),
+            ComplianceValidatorAgent(
+                SlowFakeClient(['{"passed":true,"curriculum_compliant":true,"issues":[]}'])
+            ),
+        )
+
+        started = time.monotonic()
+        result = service.generate_verified(
+            GenerateRequest(level="University of Tokyo", topic="free")
+        )
+        elapsed = time.monotonic() - started
+
+        self.assertEqual(result["status"], "success")
+        self.assertLess(elapsed, 0.35)
 
     def test_service_repairs_after_compliance_validator_failure(self):
         generator_client = FakeClient(

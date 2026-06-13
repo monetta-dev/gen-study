@@ -1,8 +1,10 @@
 import json
+import os
 import threading
 import unittest
 import urllib.error
 import urllib.request
+from unittest.mock import patch
 
 from mathgen.agents import (
     ComplianceValidatorAgent,
@@ -13,6 +15,7 @@ from mathgen.agents import (
     RepairAgent,
 )
 from mathgen.api import MathGenerationHandler, create_server
+import mathgen.api as api_module
 from mathgen.models import ModelOutputError
 
 
@@ -153,6 +156,85 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("trace", payload)
         self.assertTrue(any("Generator request" in record for record in payload["trace"]))
+
+    def test_generate_stream_endpoint_returns_ndjson_result(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient(['{"problem":"問","solution":"解"}'])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(
+                FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
+            ),
+            ComplianceValidatorAgent(
+                FakeClient(['{"passed":true,"curriculum_compliant":true,"issues":[]}'])
+            ),
+        )
+        server = self.start_server(service)
+
+        body = json.dumps(
+            {"level": "University of Tokyo", "topic": "Probability Recurrence Relations"}
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/generate/stream",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        with urllib.request.urlopen(request, timeout=5) as response:
+            lines = [
+                json.loads(line)
+                for line in response.read().decode("utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(lines[-1]["type"], "result")
+        self.assertEqual(lines[-1]["data"]["status"], "success")
+        self.assertEqual(lines[-1]["data"]["problem"], "問")
+
+    def test_build_service_uses_role_specific_client_settings(self):
+        previous = {
+            key: os.environ.get(key)
+            for key in (
+                "OPENCODE_GO_API_KEY",
+                "COMPLIANCE_VALIDATOR_MODEL",
+                "COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS",
+                "COMPLIANCE_VALIDATOR_THINKING_ENABLED",
+            )
+        }
+        calls = []
+
+        class FakeOpenCodeClient:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+
+            def chat(self, messages):
+                raise AssertionError("chat should not be called")
+
+        try:
+            os.environ["OPENCODE_GO_API_KEY"] = "test-key"
+            os.environ["COMPLIANCE_VALIDATOR_MODEL"] = "qwen3.7-plus"
+            os.environ["COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS"] = "4096"
+            os.environ["COMPLIANCE_VALIDATOR_THINKING_ENABLED"] = "true"
+            with patch.object(api_module, "OpenCodeGoClient", FakeOpenCodeClient):
+                api_module.build_service()
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        self.assertIn(
+            {
+                "model": "qwen3.7-plus",
+                "max_tokens": None,
+                "thinking_budget_tokens": 4096,
+                "thinking_enabled": True,
+                "stream": None,
+            },
+            calls,
+        )
 
     def test_generate_endpoint_rejects_invalid_request(self):
         service = MathGenerationService(
