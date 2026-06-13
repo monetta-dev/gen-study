@@ -333,6 +333,18 @@ https://your-service-name.onrender.com/
 The viewer uses MathJax from a CDN, so LaTeX rendering needs browser access to
 that script. The raw text still displays if MathJax is unavailable.
 
+By default, the GUI is production-safe: it does not request process traces, hides
+the process panel, and the plain-text panel shows only the final problem and
+solution before MathJax rendering. For local debugging, edit `viewer/config.js`:
+
+```js
+window.GEN_STUDY_CONFIG = {
+  includeTrace: true,
+  showProcess: true,
+  showFullRawResponse: true
+};
+```
+
 ## Test
 
 ```bash

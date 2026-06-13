@@ -1,4 +1,7 @@
 window.GEN_STUDY_CONFIG = {
   apiUrl: "",
-  visualApiUrl: ""
+  visualApiUrl: "",
+  includeTrace: false,
+  showProcess: false,
+  showFullRawResponse: false
 };

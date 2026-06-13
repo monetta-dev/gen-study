@@ -22,8 +22,24 @@ const solutionOutput = document.getElementById("solutionOutput");
 const visualOutput = document.getElementById("visualOutput");
 const processOutput = document.getElementById("processOutput");
 const rawOutput = document.getElementById("rawOutput");
+const processSection = document.querySelector(".process-section");
 let currentTextResponse = null;
 let currentVisualResponse = null;
+
+function appConfig() {
+  return window.GEN_STUDY_CONFIG || {};
+}
+
+function configFlag(name, defaultValue = false) {
+  const value = appConfig()[name];
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+  }
+  return defaultValue;
+}
 
 const defaultTopicsBySubject = {
   mathematics: "Probability Recurrence Relations",
@@ -53,7 +69,7 @@ const topicOptionsBySubject = {
 };
 
 function defaultApiUrl() {
-  const configuredApiUrl = window.GEN_STUDY_CONFIG && window.GEN_STUDY_CONFIG.apiUrl;
+  const configuredApiUrl = appConfig().apiUrl;
   if (configuredApiUrl) {
     return configuredApiUrl;
   }
@@ -64,7 +80,7 @@ function defaultApiUrl() {
 }
 
 function defaultVisualApiUrl() {
-  const configuredApiUrl = window.GEN_STUDY_CONFIG && window.GEN_STUDY_CONFIG.visualApiUrl;
+  const configuredApiUrl = appConfig().visualApiUrl;
   if (configuredApiUrl) {
     return configuredApiUrl;
   }
@@ -236,12 +252,18 @@ function resetVisualOutput(message = "No visuals loaded.") {
 }
 
 function resetProcessOutput(message = "No process loaded.") {
+  if (!configFlag("showProcess")) {
+    return;
+  }
   clearNode(processOutput);
   processOutput.textContent = message;
   processOutput.classList.add("empty");
 }
 
 function renderTraceRecords(records, title, append = true) {
+  if (!configFlag("showProcess")) {
+    return;
+  }
   if (!append) {
     clearNode(processOutput);
   }
@@ -356,7 +378,7 @@ async function typeset() {
 }
 
 async function renderResponse(data) {
-  renderRawResponse({ text: data, visual: currentVisualResponse });
+  renderRawResponse(data);
 
   if (data.status === "success") {
     currentTextResponse = data;
@@ -382,12 +404,15 @@ async function renderResponse(data) {
 }
 
 function requestPayload() {
-  return {
+  const payload = {
     subject: subjectInput.value,
     level: levelInput.value.trim(),
-    topic: topicInput.value.trim(),
-    trace: true
+    topic: topicInput.value.trim()
   };
+  if (configFlag("includeTrace")) {
+    payload.trace = true;
+  }
+  return payload;
 }
 
 async function generateProblem(event) {
@@ -444,14 +469,17 @@ function visualPayload() {
   if (!currentTextResponse) {
     return null;
   }
-  return {
+  const payload = {
     subject: subjectInput.value,
     level: levelInput.value.trim(),
     topic: topicInput.value.trim(),
     problem: currentTextResponse.problem,
-    solution: currentTextResponse.solution,
-    trace: true
+    solution: currentTextResponse.solution
   };
+  if (configFlag("includeTrace")) {
+    payload.trace = true;
+  }
+  return payload;
 }
 
 async function generateVisuals() {
@@ -488,7 +516,7 @@ async function generateVisuals() {
     }
     renderVisualResponse(data);
     renderTraceRecords(data.trace, "Visual Generation", true);
-    renderRawResponse({ text: currentTextResponse, visual: data });
+    renderRawResponse(configFlag("showFullRawResponse") ? { text: currentTextResponse, visual: data } : currentTextResponse);
     if (!response.ok && data.status !== "failed") {
       setStatus(data.detail || data.error || "Visual generation failed.", "error");
       return;
@@ -513,7 +541,23 @@ function loadSample() {
 }
 
 function renderRawResponse(value) {
-  rawOutput.textContent = JSON.stringify(redactRawResponse(value), null, 2);
+  if (configFlag("showFullRawResponse")) {
+    rawOutput.textContent = JSON.stringify(redactRawResponse(value), null, 2);
+    return;
+  }
+  rawOutput.textContent = plainTextResponse(value);
+}
+
+function plainTextResponse(value) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const problem = String(value.problem || "").trim();
+  const solution = String(value.solution || "").trim();
+  if (!problem && !solution) {
+    return "";
+  }
+  return `=== Problem ===\n${problem}\n\n=== Solution ===\n${solution}`;
 }
 
 function redactRawResponse(value) {
@@ -536,6 +580,9 @@ function redactRawResponse(value) {
 
 apiUrlInput.value = defaultApiUrl();
 visualApiUrlInput.value = defaultVisualApiUrl();
+if (processSection && !configFlag("showProcess")) {
+  processSection.hidden = true;
+}
 initializeRequestDefaults();
 form.addEventListener("submit", generateProblem);
 subjectInput.addEventListener("change", syncTopicForSubject);
