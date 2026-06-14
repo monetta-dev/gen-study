@@ -197,7 +197,6 @@ class ApiTests(unittest.TestCase):
             key: os.environ.get(key)
             for key in (
                 "OPENCODE_GO_API_KEY",
-                "COMPLIANCE_VALIDATOR_MODEL",
                 "COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS",
                 "COMPLIANCE_VALIDATOR_THINKING_ENABLED",
             )
@@ -213,7 +212,6 @@ class ApiTests(unittest.TestCase):
 
         try:
             os.environ["OPENCODE_GO_API_KEY"] = "test-key"
-            os.environ["COMPLIANCE_VALIDATOR_MODEL"] = "qwen3.7-plus"
             os.environ["COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS"] = "4096"
             os.environ["COMPLIANCE_VALIDATOR_THINKING_ENABLED"] = "true"
             with patch.object(api_module, "OpenCodeGoClient", FakeOpenCodeClient):
@@ -227,7 +225,6 @@ class ApiTests(unittest.TestCase):
 
         self.assertIn(
             {
-                "model": "qwen3.7-plus",
                 "max_tokens": None,
                 "thinking_budget_tokens": 4096,
                 "thinking_enabled": True,

@@ -17,23 +17,20 @@ containing `allow_visuals` or `allow_diagram` are rejected.
 
 - Python 3.11+
 - `OPENCODE_GO_API_KEY` in `.env.local` or the shell environment
-- Optional: `OPENCODE_GO_MODEL`, defaults to `qwen3.7-max`
-- Optional visual API setting: `VISUAL_TIKZ_MODEL`, defaults to `qwen3.7-max`
 - Optional visual API setting: `VISUAL_TIKZ_REPAIR_ATTEMPTS`, defaults to `2`
 - Optional: `OPENCODE_GO_BASE_URL`, defaults to `https://opencode.ai/zen/go/v1`
-- Optional: `OPENCODE_GO_API_STYLE`; normally omitted and inferred from the model
 - Optional: `OPENCODE_GO_TIMEOUT_SECONDS`, defaults to `300`
 - Optional: `OPENCODE_GO_MAX_TOKENS`, defaults to `32768`
-- Optional: `OPENCODE_GO_STREAM`, defaults to `true` for Anthropic-compatible `/messages`
+- Optional: `OPENCODE_GO_STREAM`, defaults to `true`
 - Optional: `OPENCODE_GO_THINKING_ENABLED`, defaults to `true`
 - Optional: `OPENCODE_GO_THINKING_BUDGET_TOKENS`, defaults to `16384`
 - Optional: `OPENCODE_GO_THINKING_DISPLAY`, defaults to `omitted`
 - Optional: `OPENCODE_GO_RETRY_ATTEMPTS`, defaults to `3`
 - Optional: `OPENCODE_GO_RETRY_DELAY_SECONDS`, defaults to `10`
-- Optional narrow-agent overrides such as `COMPLIANCE_VALIDATOR_MODEL`,
-  `COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS`,
-  `VISUAL_INSTRUCTION_MODEL`, and `VISUAL_TIKZ_VALIDATOR_MODEL`; blank means
-  use the main model and thinking settings
+- Optional narrow-agent thinking-budget overrides such as
+  `COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS` and
+  `VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS`; blank means use the main
+  Qwen thinking settings
 - Optional: `MAX_REPAIR_ATTEMPTS`; blank means no hard repair limit
 - Optional: `GENERATION_TRACE`, defaults to `false`
 - Optional: `API_HOST`, defaults to `127.0.0.1`
@@ -57,11 +54,8 @@ Then edit `.env.local` and set your actual API key:
 
 ```dotenv
 OPENCODE_GO_API_KEY=your_opencode_go_api_key_here
-OPENCODE_GO_MODEL=qwen3.7-max
-VISUAL_TIKZ_MODEL=qwen3.7-max
 VISUAL_TIKZ_REPAIR_ATTEMPTS=2
 OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
-OPENCODE_GO_API_STYLE=
 OPENCODE_GO_STREAM=true
 OPENCODE_GO_TIMEOUT_SECONDS=300
 OPENCODE_GO_MAX_TOKENS=32768
@@ -69,14 +63,11 @@ OPENCODE_GO_THINKING_ENABLED=true
 OPENCODE_GO_THINKING_BUDGET_TOKENS=16384
 OPENCODE_GO_THINKING_DISPLAY=omitted
 OPENCODE_GO_ANTHROPIC_VERSION=2023-06-01
-OPENCODE_GO_USER_AGENT=gen-study/0.1 OpenCode Go client
+OPENCODE_GO_USER_AGENT=gen-study/0.1 Qwen client
 OPENCODE_GO_RETRY_ATTEMPTS=3
 OPENCODE_GO_RETRY_DELAY_SECONDS=10
-COMPLIANCE_VALIDATOR_MODEL=
 COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS=
-VISUAL_INSTRUCTION_MODEL=
 VISUAL_INSTRUCTION_THINKING_BUDGET_TOKENS=
-VISUAL_TIKZ_VALIDATOR_MODEL=
 VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS=
 MAX_REPAIR_ATTEMPTS=
 GENERATION_TRACE=false
@@ -127,7 +118,6 @@ The backend is standardized on OpenCode Go. For Qwen3.7 Max, configure Render or
 
 ```dotenv
 OPENCODE_GO_API_KEY=your_opencode_go_api_key
-OPENCODE_GO_MODEL=qwen3.7-max
 OPENCODE_GO_STREAM=true
 OPENCODE_GO_THINKING_ENABLED=true
 OPENCODE_GO_THINKING_DISPLAY=omitted
@@ -139,9 +129,9 @@ This calls:
 POST https://opencode.ai/zen/go/v1/messages
 ```
 
-The client infers the Anthropic-compatible `/messages` endpoint for
-`qwen3.7-max`. It uses internal SSE streaming by default, then collects the
-streamed text and returns the same normal JSON response from this API.
+The client always uses Qwen 3.7 Max through the Anthropic-compatible
+`/messages` endpoint. It uses internal SSE streaming by default, then collects
+the streamed text and returns the same normal JSON response from this API.
 
 Thinking is sent as:
 
@@ -154,21 +144,11 @@ Thinking is sent as:
 are intentionally high now that streaming avoids the Cloudflare read-timeout
 problem.
 
-Role-specific model and thinking overrides are supported for narrow sub-agents.
-For example, you can set `COMPLIANCE_VALIDATOR_MODEL=qwen3.7-plus` or
-`VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS=4096`. Leave these blank to keep
-the main high-quality model and thinking budget everywhere. The generator,
-repair agent, and critical validator should generally stay on the strongest
-settings unless you have tested quality carefully.
-
-OpenCode Go models currently handled as Anthropic-compatible `/messages`:
-
-- `qwen3.7-max`
-- `qwen3.7-plus`
-- `qwen3.6-plus`
-- `minimax-m3`
-- `minimax-m2.7`
-- `minimax-m2.5`
+Role-specific thinking-budget overrides are supported for narrow sub-agents,
+for example `VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS=4096`. Leave these
+blank to keep the main high-quality Qwen thinking budget everywhere. The
+generator, repair agent, and critical validator should generally stay on the
+strongest settings unless you have tested quality carefully.
 
 For visual generation, the API first asks a visual instruction agent whether a
 diagram, graph, chemical structure, or explanatory figure is needed for the
@@ -176,7 +156,6 @@ completed problem and solution. It can request multiple separate visuals for one
 problem. Visual assets are generated as TikZ source:
 
 ```dotenv
-VISUAL_TIKZ_MODEL=qwen3.7-max
 VISUAL_TIKZ_REPAIR_ATTEMPTS=2
 ```
 
@@ -186,15 +165,6 @@ runs again until it passes or reaches `VISUAL_TIKZ_REPAIR_ATTEMPTS`. The visual
 API returns `tikz_source` only and does not compile LaTeX on the server. This
 keeps the main API fast and avoids a heavy TeX runtime dependency. The text-only
 `/generate` endpoint does not read this visual setting.
-
-OpenCode Go models currently handled as OpenAI-compatible `/chat/completions`:
-
-- `glm-5.1`
-- `glm-5`
-- `kimi-k2.6`
-- `kimi-k2.5`
-- `mimo-v2.5`
-- `mimo-v2.5-pro`
 
 If OpenCode Go returns Cloudflare 1010 `browser_signature_banned`, the request
 was blocked before reaching the LLM API. The client sends

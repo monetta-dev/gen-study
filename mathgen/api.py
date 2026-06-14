@@ -79,18 +79,9 @@ def build_visual_service(
         capture=capture_trace,
     )
     instruction_client = _opencode_client_for_role("VISUAL_INSTRUCTION")
-    tikz_model = (
-        _env_string("VISUAL_TIKZ_MODEL")
-        or _env_string("OPENCODE_GO_MODEL")
-        or "qwen3.7-max"
-    )
-    tikz_client = _opencode_client_for_role("VISUAL_TIKZ", default_model=tikz_model)
-    tikz_validator_client = _opencode_client_for_role(
-        "VISUAL_TIKZ_VALIDATOR", default_model=tikz_model
-    )
-    tikz_repair_client = _opencode_client_for_role(
-        "VISUAL_TIKZ_REPAIR", default_model=tikz_model
-    )
+    tikz_client = _opencode_client_for_role("VISUAL_TIKZ")
+    tikz_validator_client = _opencode_client_for_role("VISUAL_TIKZ_VALIDATOR")
+    tikz_repair_client = _opencode_client_for_role("VISUAL_TIKZ_REPAIR")
     return VisualGenerationService(
         instruction_agent=VisualInstructionAgent(instruction_client, tracer=tracer),
         tikz_agent=TikZGenerationAgent(tikz_client, tracer=tracer),
@@ -102,13 +93,8 @@ def build_visual_service(
     )
 
 
-def _opencode_client_for_role(
-    role: str,
-    default_model: str | None = None,
-) -> OpenCodeGoClient:
-    model = _env_string(f"{role}_MODEL") or default_model or None
+def _opencode_client_for_role(role: str) -> OpenCodeGoClient:
     return OpenCodeGoClient(
-        model=model,
         max_tokens=_env_optional_int(f"{role}_MAX_TOKENS"),
         thinking_budget_tokens=_env_optional_int(f"{role}_THINKING_BUDGET_TOKENS"),
         thinking_enabled=_env_optional_flag(f"{role}_THINKING_ENABLED"),
