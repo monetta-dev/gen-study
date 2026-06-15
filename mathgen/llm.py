@@ -11,7 +11,10 @@ import urllib.request
 from typing import Any
 
 OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
-QWEN_MODEL = "qwen3.7-max"
+QWEN_MAX_MODEL = "qwen3.7-max"
+QWEN_PLUS_MODEL = "qwen3.7-plus"
+QWEN_MODELS = {QWEN_MAX_MODEL, QWEN_PLUS_MODEL}
+QWEN_MODEL = QWEN_MAX_MODEL
 
 
 class LLMError(RuntimeError):
@@ -54,7 +57,7 @@ def _env_flag(name: str, default: bool) -> bool:
 
 
 class OpenCodeGoClient:
-    """Qwen 3.7 Max client for OpenCode Go's Anthropic-compatible endpoint."""
+    """Qwen 3.7 client for OpenCode Go's Anthropic-compatible endpoint."""
 
     def __init__(
         self,
@@ -70,12 +73,7 @@ class OpenCodeGoClient:
     ) -> None:
         self.api_key = api_key or _env_string("OPENCODE_GO_API_KEY")
         self.base_url = (base_url or _env_string("OPENCODE_GO_BASE_URL", OPENCODE_GO_BASE_URL)).rstrip("/")
-        self.model = QWEN_MODEL
-        if model and model != QWEN_MODEL:
-            raise LLMError(f"Only {QWEN_MODEL} is supported")
-        configured_model = _env_string("OPENCODE_GO_MODEL")
-        if configured_model and configured_model != QWEN_MODEL:
-            raise LLMError(f"Only {QWEN_MODEL} is supported")
+        self.model = self._configured_model(model)
         self.timeout_seconds = timeout_seconds or _env_float("OPENCODE_GO_TIMEOUT_SECONDS", 300.0)
         self.max_tokens = max_tokens or _env_int("OPENCODE_GO_MAX_TOKENS", 32768)
         self.thinking_budget_tokens = (
@@ -93,6 +91,13 @@ class OpenCodeGoClient:
         self.retry_attempts = _env_int("OPENCODE_GO_RETRY_ATTEMPTS", 3)
         self.retry_delay_seconds = _env_float("OPENCODE_GO_RETRY_DELAY_SECONDS", 10.0)
         self.user_agent = _env_string("OPENCODE_GO_USER_AGENT", "gen-study/0.1 Qwen client")
+
+    def _configured_model(self, model: str | None) -> str:
+        configured_model = model or _env_string("OPENCODE_GO_MODEL", QWEN_MODEL)
+        if configured_model not in QWEN_MODELS:
+            allowed = ", ".join(sorted(QWEN_MODELS))
+            raise LLMError(f"OPENCODE_GO_MODEL must be one of: {allowed}")
+        return configured_model
 
     def chat(self, messages: list[dict[str, Any]]) -> str:
         if not self.api_key:

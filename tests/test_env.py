@@ -60,3 +60,24 @@ class EnvTests(unittest.TestCase):
                     os.environ.pop("OPENCODE_GO_TIMEOUT_SECONDS", None)
                 else:
                     os.environ["OPENCODE_GO_TIMEOUT_SECONDS"] = previous_timeout
+
+    def test_load_dotenv_refreshes_values_it_loaded_earlier(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env.local"
+            env_path.write_text("GENERATOR_MODEL=\n", encoding="utf-8")
+
+            previous_model = os.environ.get("GENERATOR_MODEL")
+            os.environ.pop("GENERATOR_MODEL", None)
+            try:
+                load_dotenv(env_path)
+                self.assertEqual(os.environ["GENERATOR_MODEL"], "")
+
+                env_path.write_text("GENERATOR_MODEL=qwen3.7-plus\n", encoding="utf-8")
+                load_dotenv(env_path)
+
+                self.assertEqual(os.environ["GENERATOR_MODEL"], "qwen3.7-plus")
+            finally:
+                if previous_model is None:
+                    os.environ.pop("GENERATOR_MODEL", None)
+                else:
+                    os.environ["GENERATOR_MODEL"] = previous_model

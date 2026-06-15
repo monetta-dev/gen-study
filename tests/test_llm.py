@@ -6,7 +6,7 @@ import urllib.error
 import unittest
 from unittest.mock import patch
 
-from mathgen.llm import LLMError, OpenCodeGoClient, QWEN_MODEL
+from mathgen.llm import LLMError, OpenCodeGoClient, QWEN_MODEL, QWEN_PLUS_MODEL
 
 
 class FakeMessagesResponse:
@@ -175,6 +175,42 @@ class OpenCodeGoClientTests(unittest.TestCase):
         self.assertEqual(content, '{"problem":"p","solution":"s"}')
         self.assertNotIn("stream", captured["payload"])
 
+    def test_global_model_can_use_qwen_plus(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return FakeMessagesResponse()
+
+        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
+        os.environ["OPENCODE_GO_MODEL"] = QWEN_PLUS_MODEL
+        os.environ["OPENCODE_GO_STREAM"] = "false"
+
+        client = OpenCodeGoClient()
+
+        with patch("urllib.request.urlopen", fake_urlopen):
+            client.chat([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(captured["payload"]["model"], QWEN_PLUS_MODEL)
+
+    def test_explicit_model_overrides_global_model(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return FakeMessagesResponse()
+
+        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
+        os.environ["OPENCODE_GO_MODEL"] = QWEN_PLUS_MODEL
+        os.environ["OPENCODE_GO_STREAM"] = "false"
+
+        client = OpenCodeGoClient(model=QWEN_MODEL)
+
+        with patch("urllib.request.urlopen", fake_urlopen):
+            client.chat([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(captured["payload"]["model"], QWEN_MODEL)
+
     def test_thinking_can_be_disabled(self):
         captured = {}
 
@@ -296,7 +332,7 @@ class OpenCodeGoClientTests(unittest.TestCase):
         os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
         os.environ["OPENCODE_GO_MODEL"] = "other-model"
 
-        with self.assertRaisesRegex(LLMError, QWEN_MODEL):
+        with self.assertRaisesRegex(LLMError, "qwen3.7"):
             OpenCodeGoClient()
 
     def test_retryable_http_error_retries_then_succeeds(self):

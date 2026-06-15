@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import tempfile
 import unittest
 import urllib.error
 import urllib.request
@@ -162,10 +163,15 @@ class ApiTests(unittest.TestCase):
             key: os.environ.get(key)
             for key in (
                 "OPENCODE_GO_API_KEY",
+                "GENERATOR_MODEL",
+                "REPAIR_MODEL",
+                "CRITICAL_VALIDATOR_MODEL",
+                "COMPLIANCE_VALIDATOR_MODEL",
                 "COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS",
                 "COMPLIANCE_VALIDATOR_THINKING_ENABLED",
             )
         }
+        previous_cwd = os.getcwd()
         calls = []
 
         class FakeOpenCodeClient:
@@ -175,21 +181,39 @@ class ApiTests(unittest.TestCase):
             def chat(self, messages):
                 raise AssertionError("chat should not be called")
 
-        try:
-            os.environ["OPENCODE_GO_API_KEY"] = "test-key"
-            os.environ["COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS"] = "4096"
-            os.environ["COMPLIANCE_VALIDATOR_THINKING_ENABLED"] = "true"
-            with patch.object(api_module, "OpenCodeGoClient", FakeOpenCodeClient):
-                api_module.build_service()
-        finally:
-            for key, value in previous.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                os.chdir(tmpdir)
+                os.environ["OPENCODE_GO_API_KEY"] = "test-key"
+                os.environ["GENERATOR_MODEL"] = "qwen3.7-plus"
+                os.environ.pop("REPAIR_MODEL", None)
+                os.environ.pop("CRITICAL_VALIDATOR_MODEL", None)
+                os.environ.pop("COMPLIANCE_VALIDATOR_MODEL", None)
+                os.environ["COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS"] = "4096"
+                os.environ["COMPLIANCE_VALIDATOR_THINKING_ENABLED"] = "true"
+                with patch.object(api_module, "OpenCodeGoClient", FakeOpenCodeClient):
+                    api_module.build_service()
+            finally:
+                os.chdir(previous_cwd)
+                for key, value in previous.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
 
         self.assertIn(
             {
+                "model": "qwen3.7-plus",
+                "max_tokens": None,
+                "thinking_budget_tokens": None,
+                "thinking_enabled": None,
+                "stream": None,
+            },
+            calls,
+        )
+        self.assertIn(
+            {
+                "model": None,
                 "max_tokens": None,
                 "thinking_budget_tokens": 4096,
                 "thinking_enabled": True,

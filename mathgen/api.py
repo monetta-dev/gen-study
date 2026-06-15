@@ -87,6 +87,7 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
 
 def _opencode_client_for_role(role: str) -> OpenCodeGoClient:
     return OpenCodeGoClient(
+        model=_env_optional_string(f"{role}_MODEL"),
         max_tokens=_env_optional_int(f"{role}_MAX_TOKENS"),
         thinking_budget_tokens=_env_optional_int(f"{role}_THINKING_BUDGET_TOKENS"),
         thinking_enabled=_env_optional_flag(f"{role}_THINKING_ENABLED"),
@@ -133,6 +134,11 @@ def _env_optional_flag(name: str) -> bool | None:
 
 def _env_string(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
+
+
+def _env_optional_string(name: str) -> str | None:
+    value = os.getenv(name, "").strip()
+    return value or None
 
 
 def _payload_trace_enabled(payload: dict[str, Any]) -> bool:
