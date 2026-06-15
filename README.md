@@ -82,9 +82,13 @@ VISUAL_TIKZ_VALIDATOR_MODEL=
 VISUAL_TIKZ_REPAIR_MODEL=
 GENERATOR_MAX_TOKENS=
 GENERATOR_THINKING_BUDGET_TOKENS=
+REPAIR_THINKING_BUDGET_TOKENS=
+CRITICAL_VALIDATOR_THINKING_BUDGET_TOKENS=
 COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS=
 VISUAL_INSTRUCTION_THINKING_BUDGET_TOKENS=
+VISUAL_TIKZ_THINKING_BUDGET_TOKENS=
 VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS=
+VISUAL_TIKZ_REPAIR_THINKING_BUDGET_TOKENS=
 MAX_REPAIR_ATTEMPTS=
 GENERATION_TRACE=false
 API_HOST=127.0.0.1
@@ -185,11 +189,22 @@ Thinking is sent as:
 are intentionally high now that streaming avoids the Cloudflare read-timeout
 problem.
 
-Role-specific thinking-budget overrides are supported for narrow sub-agents,
-for example `VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS=4096`. Leave these
-blank to keep the main high-quality Qwen thinking budget everywhere. The
-generator, repair agent, and critical validator should generally stay on the
-strongest settings unless you have tested quality carefully.
+Role-specific thinking-budget overrides are supported for every agent. Leave
+these blank to keep the main high-quality Qwen thinking budget everywhere.
+
+```text
+GENERATOR_THINKING_BUDGET_TOKENS
+REPAIR_THINKING_BUDGET_TOKENS
+CRITICAL_VALIDATOR_THINKING_BUDGET_TOKENS
+COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS
+VISUAL_INSTRUCTION_THINKING_BUDGET_TOKENS
+VISUAL_TIKZ_THINKING_BUDGET_TOKENS
+VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS
+VISUAL_TIKZ_REPAIR_THINKING_BUDGET_TOKENS
+```
+
+The generator, repair agent, critical validator, and TikZ generator should
+generally stay on stronger settings unless you have tested quality carefully.
 
 The same mechanism can tune the Generator if you test Qwen 3.7 Plus there:
 

@@ -167,6 +167,8 @@ class ApiTests(unittest.TestCase):
                 "REPAIR_MODEL",
                 "CRITICAL_VALIDATOR_MODEL",
                 "COMPLIANCE_VALIDATOR_MODEL",
+                "REPAIR_THINKING_BUDGET_TOKENS",
+                "CRITICAL_VALIDATOR_THINKING_BUDGET_TOKENS",
                 "COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS",
                 "COMPLIANCE_VALIDATOR_THINKING_ENABLED",
             )
@@ -189,6 +191,8 @@ class ApiTests(unittest.TestCase):
                 os.environ.pop("REPAIR_MODEL", None)
                 os.environ.pop("CRITICAL_VALIDATOR_MODEL", None)
                 os.environ.pop("COMPLIANCE_VALIDATOR_MODEL", None)
+                os.environ["REPAIR_THINKING_BUDGET_TOKENS"] = "2048"
+                os.environ["CRITICAL_VALIDATOR_THINKING_BUDGET_TOKENS"] = "8192"
                 os.environ["COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS"] = "4096"
                 os.environ["COMPLIANCE_VALIDATOR_THINKING_ENABLED"] = "true"
                 with patch.object(api_module, "OpenCodeGoClient", FakeOpenCodeClient):
@@ -215,11 +219,75 @@ class ApiTests(unittest.TestCase):
             {
                 "model": None,
                 "max_tokens": None,
+                "thinking_budget_tokens": 2048,
+                "thinking_enabled": None,
+                "stream": None,
+            },
+            calls,
+        )
+        self.assertIn(
+            {
+                "model": None,
+                "max_tokens": None,
+                "thinking_budget_tokens": 8192,
+                "thinking_enabled": None,
+                "stream": None,
+            },
+            calls,
+        )
+        self.assertIn(
+            {
+                "model": None,
+                "max_tokens": None,
                 "thinking_budget_tokens": 4096,
                 "thinking_enabled": True,
                 "stream": None,
             },
             calls,
+        )
+
+    def test_build_visual_service_uses_role_specific_thinking_budgets(self):
+        previous = {
+            key: os.environ.get(key)
+            for key in (
+                "OPENCODE_GO_API_KEY",
+                "VISUAL_INSTRUCTION_THINKING_BUDGET_TOKENS",
+                "VISUAL_TIKZ_THINKING_BUDGET_TOKENS",
+                "VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS",
+                "VISUAL_TIKZ_REPAIR_THINKING_BUDGET_TOKENS",
+            )
+        }
+        previous_cwd = os.getcwd()
+        calls = []
+
+        class FakeOpenCodeClient:
+            def __init__(self, **kwargs):
+                calls.append(kwargs)
+
+            def chat(self, messages):
+                raise AssertionError("chat should not be called")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                os.chdir(tmpdir)
+                os.environ["OPENCODE_GO_API_KEY"] = "test-key"
+                os.environ["VISUAL_INSTRUCTION_THINKING_BUDGET_TOKENS"] = "1024"
+                os.environ["VISUAL_TIKZ_THINKING_BUDGET_TOKENS"] = "8192"
+                os.environ["VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS"] = "2048"
+                os.environ["VISUAL_TIKZ_REPAIR_THINKING_BUDGET_TOKENS"] = "4096"
+                with patch.object(api_module, "OpenCodeGoClient", FakeOpenCodeClient):
+                    api_module.build_visual_service()
+            finally:
+                os.chdir(previous_cwd)
+                for key, value in previous.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+
+        self.assertEqual(
+            [call["thinking_budget_tokens"] for call in calls],
+            [1024, 8192, 2048, 4096],
         )
 
     def test_generate_endpoint_rejects_invalid_request(self):
