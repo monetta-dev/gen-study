@@ -232,17 +232,6 @@ curl -X POST http://127.0.0.1:8000/generate \
   -d '{"subject":"mathematics","level":"University of Tokyo","topic":"Probability Recurrence Relations"}'
 ```
 
-For GUI-style progress updates, use the newline-delimited JSON stream endpoint:
-
-```bash
-curl -N -X POST http://127.0.0.1:8000/generate/stream \
-  -H 'Content-Type: application/json' \
-  -d '{"subject":"mathematics","level":"University of Tokyo","topic":"free"}'
-```
-
-It emits `progress` events and ends with a `result` event containing the same
-final response shape as `POST /generate`.
-
 Generate a visual asset from a completed problem and solution:
 
 ```bash
@@ -250,8 +239,6 @@ curl -X POST http://127.0.0.1:8000/visuals/generate \
   -H 'Content-Type: application/json' \
   -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics","problem":"問題文...","solution":"解答..."}'
 ```
-
-The matching progress endpoint is `POST /visuals/generate/stream`.
 
 If visuals are needed, the response includes one or more TikZ assets:
 

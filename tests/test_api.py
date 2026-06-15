@@ -157,41 +157,6 @@ class ApiTests(unittest.TestCase):
         self.assertIn("trace", payload)
         self.assertTrue(any("Generator request" in record for record in payload["trace"]))
 
-    def test_generate_stream_endpoint_returns_ndjson_result(self):
-        service = MathGenerationService(
-            GeneratorAgent(FakeClient(['{"problem":"問","solution":"解"}'])),
-            RepairAgent(FakeClient([])),
-            CriticalValidatorAgent(
-                FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
-            ),
-            ComplianceValidatorAgent(
-                FakeClient(['{"passed":true,"curriculum_compliant":true,"issues":[]}'])
-            ),
-        )
-        server = self.start_server(service)
-
-        body = json.dumps(
-            {"level": "University of Tokyo", "topic": "Probability Recurrence Relations"}
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{server.server_port}/generate/stream",
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
-        with urllib.request.urlopen(request, timeout=5) as response:
-            lines = [
-                json.loads(line)
-                for line in response.read().decode("utf-8").splitlines()
-                if line.strip()
-            ]
-
-        self.assertEqual(response.status, 200)
-        self.assertEqual(lines[-1]["type"], "result")
-        self.assertEqual(lines[-1]["data"]["status"], "success")
-        self.assertEqual(lines[-1]["data"]["problem"], "問")
-
     def test_build_service_uses_role_specific_client_settings(self):
         previous = {
             key: os.environ.get(key)
