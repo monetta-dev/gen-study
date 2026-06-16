@@ -21,6 +21,33 @@ class FakeChatClient:
         return self.responses.pop(0)
 
 
+class FakeRenderResult:
+    status = "compiled"
+    engine = "lualatex"
+    command_count = 1
+    issues = ()
+
+    def to_asset_fields(self):
+        return {
+            "mime_type": "image/png",
+            "png_base64": "cG5n",
+            "compile_status": "compiled",
+            "compile_engine": "lualatex",
+            "compile_command_count": 1,
+            "compile_transcript": [{"action": "run_command"}],
+        }
+
+
+class FakeRenderer:
+    def __init__(self, result=None):
+        self.result = result or FakeRenderResult()
+        self.sources = []
+
+    def render_png(self, tikz_source):
+        self.sources.append(tikz_source)
+        return self.result
+
+
 class VisualGenerationServiceTests(unittest.TestCase):
     def request(self):
         return VisualGenerateRequest.from_dict(
@@ -40,6 +67,7 @@ class VisualGenerationServiceTests(unittest.TestCase):
         validator_client=None,
         repair_client=None,
         max_repair_attempts=2,
+        renderer=None,
     ):
         return VisualGenerationService(
             VisualInstructionAgent(instruction_client),
@@ -47,6 +75,7 @@ class VisualGenerationServiceTests(unittest.TestCase):
             TikZValidatorAgent(validator_client or FakeChatClient([])),
             TikZRepairAgent(repair_client or FakeChatClient([])),
             max_repair_attempts=max_repair_attempts,
+            renderer=renderer,
         )
 
     def test_returns_no_asset_when_visual_not_needed(self):
@@ -75,6 +104,12 @@ class VisualGenerationServiceTests(unittest.TestCase):
                                 "prompt": "Draw a cart setup as TikZ.",
                                 "must_include": ["cart"],
                                 "must_not_include": ["wheels"],
+                                "visual_contract": {
+                                    "visual_intent": "show setup",
+                                    "diagram_type": "mechanics_setup",
+                                    "acceptance_criteria": ["cart is present"],
+                                    "non_goals": ["do not require scale"],
+                                },
                             }
                         ],
                     }
@@ -108,6 +143,66 @@ class VisualGenerationServiceTests(unittest.TestCase):
         tikz_payload = json.loads(tikz_client.messages[0][1]["content"])
         self.assertEqual(tikz_payload["visual_prompt"], "Draw a cart setup as TikZ.")
         self.assertEqual(tikz_payload["must_not_include"], ["wheels"])
+        self.assertEqual(
+            tikz_payload["visual_contract"]["diagram_type"],
+            "mechanics_setup",
+        )
+        validator_payload = json.loads(validator_client.messages[0][1]["content"])
+        self.assertEqual(
+            validator_payload["visual_contract"]["acceptance_criteria"],
+            ["cart is present"],
+        )
+        self.assertEqual(validator_payload["validation_mode"], "initial_validation")
+
+    def test_generates_rendered_png_asset_when_renderer_is_available(self):
+        instruction_client = FakeChatClient(
+            [
+                json.dumps(
+                    {
+                        "needed": True,
+                        "visuals": [
+                            {
+                                "id": "figure_1",
+                                "placement": "problem",
+                                "purpose": "diagram",
+                                "prompt": "Draw a cart setup as TikZ.",
+                                "must_include": ["cart"],
+                                "must_not_include": [],
+                            }
+                        ],
+                    }
+                )
+            ]
+        )
+        tikz_client = FakeChatClient(
+            [
+                json.dumps(
+                    {
+                        "tikz_source": "\\begin{tikzpicture}\\draw (0,0)--(1,0);\\end{tikzpicture}"
+                    }
+                )
+            ]
+        )
+        validator_client = FakeChatClient(
+            [json.dumps({"status": "pass", "issues": []})]
+        )
+        renderer = FakeRenderer()
+        service = self.service(
+            instruction_client,
+            tikz_client,
+            validator_client,
+            renderer=renderer,
+        )
+
+        result = service.generate_visual(self.request())
+
+        asset = result["visual_assets"][0]
+        self.assertEqual(asset["mime_type"], "image/png")
+        self.assertEqual(asset["png_base64"], "cG5n")
+        self.assertEqual(asset["compile_status"], "compiled")
+        self.assertEqual(asset["compile_engine"], "lualatex")
+        self.assertEqual(result["attempts"][1]["action"], "compile_tikz")
+        self.assertEqual(renderer.sources, [asset["tikz_source"]])
 
     def test_generates_multiple_tikz_assets(self):
         instruction_client = FakeChatClient(
@@ -235,6 +330,9 @@ class VisualGenerationServiceTests(unittest.TestCase):
         repair_payload = json.loads(repair_client.messages[0][1]["content"])
         self.assertEqual(repair_payload["validator_issues"], ["rod is too thick"])
         self.assertIn("line width=3pt", repair_payload["tikz_source"])
+        second_validation_payload = json.loads(validator_client.messages[1][1]["content"])
+        self.assertEqual(second_validation_payload["validation_mode"], "repair_validation")
+        self.assertEqual(second_validation_payload["previous_issues"], ["rod is too thick"])
 
     def test_fails_after_tikz_repair_limit(self):
         instruction_client = FakeChatClient(

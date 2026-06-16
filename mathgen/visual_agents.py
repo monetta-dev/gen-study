@@ -20,11 +20,18 @@ class VisualChatClient(Protocol):
         """Return assistant content for text or multimodal messages."""
 
 
+class TikZRendererClient(Protocol):
+    def render_png(self, tikz_source: str):
+        """Compile TikZ and return a rendered PNG result."""
+
+
 def visual_instruction_system_prompt() -> str:
     return """You are VisualInstructionAgent, an academic visual editor.
 Read the completed Japanese entrance-exam problem and solution.
 Decide whether a diagram, graph, chemical structure, table-like figure, or other visual asset is useful.
 If visuals are needed, write one exact final prompt for each TikZ generation call.
+For each visual, also create a frozen visual_contract. This contract is local to that visual and must define what later agents should treat as required, what interpretation choices are fixed, and what should not be treated as a reason for repair.
+Do not use a global template. Infer the contract from the specific problem, solution, visual purpose, and placement.
 The prompt must be detailed enough to generate a precise Japanese university entrance exam style figure.
 Prefer monochrome, clean line drawings for physics and mathematics unless the content clearly requires otherwise.
 For chemistry, preserve formulas, labels, and experimental details exactly.
@@ -32,13 +39,13 @@ Create multiple visual items when the problem or solution naturally needs multip
 Do not create copyrighted textbook-style references or mention existing books.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
-{"needed":true|false,"visuals":[{"id":"visual_1","placement":"problem|solution|explanation","purpose":"diagram|graph|chemical_structure|other","prompt":"...","must_include":["..."],"must_not_include":["..."]}]}"""
+{"needed":true|false,"visuals":[{"id":"visual_1","placement":"problem|solution|explanation","purpose":"diagram|graph|chemical_structure|other","prompt":"...","must_include":["..."],"must_not_include":["..."],"visual_contract":{"visual_intent":"...","diagram_type":"...","required_elements":["..."],"style_constraints":["..."],"interpretation_choices":["..."],"acceptance_criteria":["..."],"non_goals":["..."]}}]}"""
 
 
 def tikz_generation_system_prompt() -> str:
     return """You are TikZGenerationAgent, an academic diagram author.
 Create precise TikZ source for one Japanese university entrance-exam visual.
-Use the visual instruction, problem, and solution as constraints.
+Use the visual instruction, frozen visual_contract, problem, and solution as constraints.
 Return only TikZ code inside a JSON object.
 The TikZ source must be a single complete tikzpicture environment, not a full LaTeX document.
 Do not include \\documentclass, preamble commands, markdown fences, or explanatory text.
@@ -51,10 +58,12 @@ Return exactly this JSON shape:
 
 
 def tikz_validation_system_prompt() -> str:
-    return """You are TikZValidatorAgent, a conservative source-level reviewer for academic TikZ figures.
-Review the TikZ source against the visual instruction, problem, and solution.
-Return pass only if the source is likely compilable, contains one complete tikzpicture environment, satisfies the requested visual, uses correct labels/symbols, and is suitable as monochrome Japanese entrance-exam line art.
-Return repair_required when there is a concrete source-level or semantic issue that should be corrected.
+    return """You are TikZValidatorAgent, a conservative acceptance gate for academic TikZ figures.
+Review the TikZ source against the frozen visual_contract, visual instruction, problem, and solution.
+The visual_contract is fixed. Do not invent new criteria, alternative projection conventions, optional preferences, or new non-goals.
+Return pass unless there is a blocking violation of the frozen contract, a required element is missing, a required label/symbol is wrong, or the source is likely not compilable.
+During repair validation, evaluate only unresolved previous issues and severe new regressions that make the visual unusable.
+Do not reject for minor aesthetics, debatable visibility conventions, exact scale, exact 3D projection, or alternative diagram styles unless the frozen contract explicitly requires them.
 Do not require rendering or visual inspection. Judge only from the TikZ source and textual requirements.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
@@ -64,7 +73,8 @@ Return exactly this JSON shape:
 def tikz_repair_system_prompt() -> str:
     return """You are TikZRepairAgent, an academic TikZ source reviser.
 Repair the current TikZ source using the validator feedback.
-Preserve correct parts of the existing source, the visual instruction, labels, placement, purpose, and exam-style monochrome line-art constraints.
+Preserve correct parts of the existing source, the frozen visual_contract, labels, placement, purpose, and exam-style monochrome line-art constraints.
+Repair only the listed blocking issues. Do not reinterpret the diagram or change the frozen contract.
 Return only the repaired TikZ code inside a JSON object.
 The TikZ source must be a single complete tikzpicture environment, not a full LaTeX document.
 Do not include \\documentclass, preamble commands, markdown fences, or explanatory text.
@@ -108,7 +118,11 @@ class VisualInstructionAgent:
                 '{"needed":true,"visuals":[{"id":"visual_1",'
                 '"placement":"problem|solution|explanation",'
                 '"purpose":"diagram|graph|chemical_structure|other",'
-                '"prompt":"...","must_include":[],"must_not_include":[]}]}'
+                '"prompt":"...","must_include":[],"must_not_include":[],'
+                '"visual_contract":{"visual_intent":"...","diagram_type":"...",'
+                '"required_elements":[],"style_constraints":[],'
+                '"interpretation_choices":[],"acceptance_criteria":[],'
+                '"non_goals":[]}}]}'
             ),
         )
 
@@ -135,6 +149,7 @@ class TikZGenerationAgent:
                         "placement": instruction.placement,
                         "purpose": instruction.purpose,
                         "visual_prompt": instruction.prompt,
+                        "visual_contract": instruction.visual_contract,
                         "must_include": list(instruction.must_include),
                         "must_not_include": list(instruction.must_not_include),
                         "problem": request.problem,
@@ -166,15 +181,18 @@ class TikZValidatorAgent:
         request: VisualGenerateRequest,
         instruction: VisualInstruction,
         tikz_source: str,
+        previous_issues: tuple[str, ...] = (),
     ) -> TikZValidationResult:
+        payload = _tikz_context(request, instruction, tikz_source)
+        payload["previous_issues"] = list(previous_issues)
+        payload["validation_mode"] = (
+            "repair_validation" if previous_issues else "initial_validation"
+        )
         messages: list[dict[str, object]] = [
             {"role": "system", "content": tikz_validation_system_prompt()},
             {
                 "role": "user",
-                "content": json.dumps(
-                    _tikz_context(request, instruction, tikz_source),
-                    ensure_ascii=False,
-                ),
+                "content": json.dumps(payload, ensure_ascii=False),
             },
         ]
         return chat_json(
@@ -225,6 +243,7 @@ class VisualGenerationService:
         tikz_validator: TikZValidatorAgent,
         tikz_repair_agent: TikZRepairAgent,
         max_repair_attempts: int = 2,
+        renderer: TikZRendererClient | None = None,
         tracer: InteractionTracer | None = None,
         progress: Callable[[str], None] | None = None,
     ) -> None:
@@ -235,6 +254,7 @@ class VisualGenerationService:
         self.tikz_validator = tikz_validator
         self.tikz_repair_agent = tikz_repair_agent
         self.max_repair_attempts = max_repair_attempts
+        self.renderer = renderer
         self.tracer = tracer or InteractionTracer()
         self.progress = progress
 
@@ -291,6 +311,7 @@ class VisualGenerationService:
         self, request: VisualGenerateRequest, instruction: VisualInstruction
     ) -> dict[str, object]:
         tikz_source = self.tikz_agent.generate_tikz(request, instruction)
+        active_issues: tuple[str, ...] = ()
         attempts: list[dict[str, object]] = [
             {
                 "visual_id": instruction.visual_id,
@@ -303,19 +324,82 @@ class VisualGenerationService:
         while True:
             self._progress(f"Validating TikZ for {instruction.visual_id}.")
             validation = self.tikz_validator.validate_tikz(
-                request, instruction, tikz_source
+                request, instruction, tikz_source, active_issues
             )
             validation_dict = {
                 "visual_id": instruction.visual_id,
                 **validation.to_dict(),
             }
             if validation.status == "pass":
+                render_result = self._render_tikz(instruction.visual_id, tikz_source)
+                if render_result is None:
+                    asset = _tikz_asset(instruction, tikz_source)
+                    validation_status = "pass"
+                elif render_result.status == "compiled":
+                    asset = _tikz_asset(
+                        instruction,
+                        tikz_source,
+                        render_fields=render_result.to_asset_fields(),
+                    )
+                    attempts.append(
+                        {
+                            "visual_id": instruction.visual_id,
+                            "action": "compile_tikz",
+                            "status": render_result.status,
+                            "engine": render_result.engine,
+                            "command_count": render_result.command_count,
+                        }
+                    )
+                    validation_status = "compiled"
+                else:
+                    attempts.append(
+                        {
+                            "visual_id": instruction.visual_id,
+                            "action": "compile_tikz",
+                            "status": render_result.status,
+                            "issues": list(render_result.issues),
+                        }
+                    )
+                    if repair_count >= self.max_repair_attempts:
+                        return {
+                            "status": "failed",
+                            "asset": _tikz_asset(
+                                instruction,
+                                tikz_source,
+                                render_fields=render_result.to_asset_fields(),
+                            ),
+                            "validation": {
+                                "visual_id": instruction.visual_id,
+                                "status": "repair_required",
+                                "issues": list(render_result.issues),
+                            },
+                            "attempts": attempts,
+                            "validation_status": "compile_failed",
+                        }
+                    self._progress(f"Repairing TikZ compile issue for {instruction.visual_id}.")
+                    tikz_source = self.tikz_repair_agent.repair_tikz(
+                        request,
+                        instruction,
+                        tikz_source,
+                        render_result.issues,
+                    )
+                    active_issues = render_result.issues
+                    repair_count += 1
+                    attempts.append(
+                        {
+                            "visual_id": instruction.visual_id,
+                            "action": "repair_tikz_compile",
+                            "issues": list(render_result.issues),
+                            "tikz_source": tikz_source,
+                        }
+                    )
+                    continue
                 return {
                     "status": "success",
-                    "asset": _tikz_asset(instruction, tikz_source),
+                    "asset": asset,
                     "validation": validation_dict,
                     "attempts": attempts,
-                    "validation_status": "pass",
+                    "validation_status": validation_status,
                 }
 
             attempts.append(
@@ -338,6 +422,7 @@ class VisualGenerationService:
             tikz_source = self.tikz_repair_agent.repair_tikz(
                 request, instruction, tikz_source, validation.issues
             )
+            active_issues = validation.issues
             repair_count += 1
             attempts.append(
                 {
@@ -352,6 +437,12 @@ class VisualGenerationService:
         if self.progress is not None:
             self.progress(message)
 
+    def _render_tikz(self, visual_id: str, tikz_source: str):
+        if self.renderer is None:
+            return None
+        self._progress(f"Compiling TikZ for {visual_id}.")
+        return self.renderer.render_png(tikz_source)
+
 
 def _tikz_context(
     request: VisualGenerateRequest,
@@ -365,6 +456,7 @@ def _tikz_context(
         "placement": instruction.placement,
         "purpose": instruction.purpose,
         "visual_prompt": instruction.prompt,
+        "visual_contract": instruction.visual_contract,
         "must_include": list(instruction.must_include),
         "must_not_include": list(instruction.must_not_include),
         "problem": request.problem,
@@ -386,9 +478,11 @@ def _tikz_source_from_dict(data: dict[str, object]) -> str:
 
 
 def _tikz_asset(
-    instruction: VisualInstruction, tikz_source: str
+    instruction: VisualInstruction,
+    tikz_source: str,
+    render_fields: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    return {
+    asset = {
         "id": instruction.visual_id,
         "mime_type": "text/x-tex",
         "tikz_source": tikz_source,
@@ -396,6 +490,9 @@ def _tikz_asset(
         "purpose": instruction.purpose,
         "prompt": instruction.prompt,
     }
+    if render_fields:
+        asset.update(render_fields)
+    return asset
 
 
 def _aggregate_status(statuses: list[str]) -> str:

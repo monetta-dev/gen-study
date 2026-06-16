@@ -96,6 +96,7 @@ class VisualInstruction:
     prompt: str
     must_include: tuple[str, ...]
     must_not_include: tuple[str, ...]
+    visual_contract: dict[str, Any]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "VisualInstruction":
@@ -116,6 +117,7 @@ class VisualInstruction:
             prompt=prompt,
             must_include=_string_list(data, "must_include"),
             must_not_include=_string_list(data, "must_not_include"),
+            visual_contract=_visual_contract(data),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -127,6 +129,7 @@ class VisualInstruction:
             "prompt": self.prompt,
             "must_include": list(self.must_include),
             "must_not_include": list(self.must_not_include),
+            "visual_contract": self.visual_contract,
         }
 
 
@@ -203,6 +206,7 @@ def _with_default_visual_id(
         prompt=instruction.prompt,
         must_include=instruction.must_include,
         must_not_include=instruction.must_not_include,
+        visual_contract=instruction.visual_contract,
     )
 
 
@@ -210,6 +214,39 @@ def _visual_item(data: dict[str, Any]) -> dict[str, Any]:
     if "needed" in data:
         return data
     return {**data, "needed": True}
+
+
+def _visual_contract(data: dict[str, Any]) -> dict[str, Any]:
+    value = data.get("visual_contract", {})
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ContractError("`visual_contract` must be an object")
+    return _json_safe_object(value, "visual_contract")
+
+
+def _json_safe_object(value: dict[str, Any], field: str) -> dict[str, Any]:
+    try:
+        _assert_json_safe(value)
+    except TypeError as exc:
+        raise ContractError(f"`{field}` must contain only JSON-compatible values") from exc
+    return value
+
+
+def _assert_json_safe(value: Any) -> None:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return
+    if isinstance(value, list):
+        for item in value:
+            _assert_json_safe(item)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError("object keys must be strings")
+            _assert_json_safe(item)
+        return
+    raise TypeError(f"unsupported value type: {type(value).__name__}")
 
 
 @dataclass(frozen=True)

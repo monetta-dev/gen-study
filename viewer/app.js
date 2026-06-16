@@ -342,10 +342,13 @@ function renderVisualResponse(data) {
     const figure = document.createElement("figure");
     figure.className = "visual-figure";
 
-    const source = document.createElement("pre");
-    source.className = "tikz-source";
-    source.textContent = asset.tikz_source || "No TikZ source was returned.";
-    figure.appendChild(source);
+    if (asset.png_base64) {
+      const image = document.createElement("img");
+      image.className = "visual-image";
+      image.alt = asset.id || `visual_${index + 1}`;
+      image.src = `data:${asset.mime_type || "image/png"};base64,${asset.png_base64}`;
+      figure.appendChild(image);
+    }
 
     const caption = document.createElement("figcaption");
     const title = document.createElement("strong");
@@ -353,6 +356,29 @@ function renderVisualResponse(data) {
     caption.appendChild(title);
     caption.appendChild(document.createTextNode(` · ${asset.placement || "unknown"} · ${asset.purpose || "visual"}`));
     figure.appendChild(caption);
+
+    const sourceDetails = document.createElement("details");
+    sourceDetails.className = "source-details";
+    const sourceSummary = document.createElement("summary");
+    sourceSummary.textContent = "TikZ";
+    const source = document.createElement("pre");
+    source.className = "tikz-source";
+    source.textContent = asset.tikz_source || "No TikZ source was returned.";
+    sourceDetails.appendChild(sourceSummary);
+    sourceDetails.appendChild(source);
+    figure.appendChild(sourceDetails);
+
+    if (Array.isArray(asset.compile_transcript) && asset.compile_transcript.length > 0) {
+      const compileDetails = document.createElement("details");
+      compileDetails.className = "compile-details";
+      const compileSummary = document.createElement("summary");
+      compileSummary.textContent = `Compile: ${asset.compile_status || "unknown"}`;
+      const compileLog = document.createElement("pre");
+      compileLog.textContent = JSON.stringify(asset.compile_transcript, null, 2);
+      compileDetails.appendChild(compileSummary);
+      compileDetails.appendChild(compileLog);
+      figure.appendChild(compileDetails);
+    }
 
     if (asset.prompt) {
       const details = document.createElement("details");

@@ -37,6 +37,7 @@ from .visual_agents import (
     VisualGenerationService,
     VisualInstructionAgent,
 )
+from .tikz_renderer import TikZCompileAgent, TikZRenderer
 
 VIEWER_ROOT = Path(__file__).resolve().parents[1] / "viewer"
 
@@ -75,12 +76,22 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
     tikz_client = _opencode_client_for_role("VISUAL_TIKZ")
     tikz_validator_client = _opencode_client_for_role("VISUAL_TIKZ_VALIDATOR")
     tikz_repair_client = _opencode_client_for_role("VISUAL_TIKZ_REPAIR")
+    renderer = None
+    if _env_flag("VISUAL_RENDER_ENABLED", True):
+        tikz_compile_client = _opencode_client_for_role("VISUAL_TIKZ_COMPILE")
+        renderer = TikZRenderer(
+            compile_agent=TikZCompileAgent(tikz_compile_client, tracer=tracer),
+            timeout_seconds=_env_float("VISUAL_COMPILE_TIMEOUT_SECONDS", 30.0),
+            max_actions=_env_int("VISUAL_COMPILE_MAX_ACTIONS", 5),
+            tracer=tracer,
+        )
     return VisualGenerationService(
         instruction_agent=VisualInstructionAgent(instruction_client, tracer=tracer),
         tikz_agent=TikZGenerationAgent(tikz_client, tracer=tracer),
         tikz_validator=TikZValidatorAgent(tikz_validator_client, tracer=tracer),
         tikz_repair_agent=TikZRepairAgent(tikz_repair_client, tracer=tracer),
         max_repair_attempts=_env_int("VISUAL_TIKZ_REPAIR_ATTEMPTS", 2),
+        renderer=renderer,
         tracer=tracer,
     )
 
@@ -95,8 +106,11 @@ def _opencode_client_for_role(role: str) -> OpenCodeGoClient:
     )
 
 
-def _env_flag(name: str) -> bool:
-    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+def _env_flag(name: str, default: bool = False) -> bool:
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        return default
+    return value in {"1", "true", "yes", "on"}
 
 
 def _env_int(name: str, default: int) -> int:
@@ -109,6 +123,19 @@ def _env_int(name: str, default: int) -> int:
         raise ContractError(f"`{name}` must be an integer") from exc
     if parsed < 0:
         raise ContractError(f"`{name}` must be non-negative")
+    return parsed
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name, "").strip()
+    if not value:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise ContractError(f"`{name}` must be a number") from exc
+    if parsed <= 0:
+        raise ContractError(f"`{name}` must be positive")
     return parsed
 
 

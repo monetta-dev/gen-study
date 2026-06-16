@@ -10,8 +10,9 @@ Supported subjects:
 
 `POST /generate` is text-only. It generates and validates Japanese
 problem/solution text; visual generation is handled separately by
-`POST /visuals/generate`, which returns TikZ source. Requests to `/generate`
-containing `allow_visuals` or `allow_diagram` are rejected.
+`POST /visuals/generate`, which generates TikZ, compiles it in the Docker
+runtime, and returns rendered PNG assets. Requests to `/generate` containing
+`allow_visuals` or `allow_diagram` are rejected.
 
 ## Requirements
 
@@ -78,6 +79,7 @@ CRITICAL_VALIDATOR_MODEL=
 COMPLIANCE_VALIDATOR_MODEL=
 VISUAL_INSTRUCTION_MODEL=
 VISUAL_TIKZ_MODEL=
+VISUAL_TIKZ_COMPILE_MODEL=
 VISUAL_TIKZ_VALIDATOR_MODEL=
 VISUAL_TIKZ_REPAIR_MODEL=
 GENERATOR_MAX_TOKENS=
@@ -87,10 +89,15 @@ CRITICAL_VALIDATOR_THINKING_BUDGET_TOKENS=
 COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS=
 VISUAL_INSTRUCTION_THINKING_BUDGET_TOKENS=
 VISUAL_TIKZ_THINKING_BUDGET_TOKENS=
+VISUAL_TIKZ_COMPILE_THINKING_BUDGET_TOKENS=
 VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS=
 VISUAL_TIKZ_REPAIR_THINKING_BUDGET_TOKENS=
 MAX_REPAIR_ATTEMPTS=
 GENERATION_TRACE=false
+VISUAL_TIKZ_REPAIR_ATTEMPTS=2
+VISUAL_RENDER_ENABLED=true
+VISUAL_COMPILE_TIMEOUT_SECONDS=30
+VISUAL_COMPILE_MAX_ACTIONS=5
 API_HOST=127.0.0.1
 API_PORT=8000
 API_DEBUG=false
@@ -230,6 +237,7 @@ CRITICAL_VALIDATOR_MODEL
 COMPLIANCE_VALIDATOR_MODEL
 VISUAL_INSTRUCTION_MODEL
 VISUAL_TIKZ_MODEL
+VISUAL_TIKZ_COMPILE_MODEL
 VISUAL_TIKZ_VALIDATOR_MODEL
 VISUAL_TIKZ_REPAIR_MODEL
 ```
@@ -237,18 +245,36 @@ VISUAL_TIKZ_REPAIR_MODEL
 For visual generation, the API first asks a visual instruction agent whether a
 diagram, graph, chemical structure, or explanatory figure is needed for the
 completed problem and solution. It can request multiple separate visuals for one
-problem. Visual assets are generated as TikZ source:
+problem. Visual assets are generated as TikZ source, compiled to PDF by an
+agentic LaTeX compile loop, and returned as PNG for GUI display:
 
 ```dotenv
 VISUAL_TIKZ_REPAIR_ATTEMPTS=2
+VISUAL_RENDER_ENABLED=true
+VISUAL_COMPILE_TIMEOUT_SECONDS=30
+VISUAL_COMPILE_MAX_ACTIONS=5
 ```
+
+Each visual instruction includes a frozen `visual_contract` generated locally
+from that problem and solution. The contract records the visual intent, diagram
+type, required elements, interpretation choices, acceptance criteria, and
+non-goals for that specific visual. TikZ generation, validation, repair, and
+compilation all receive the same contract. Validators must check only blocking
+contract violations and must not introduce new optional criteria or alternative
+diagram conventions during repair validation.
 
 Each TikZ source is checked by a source-level TikZ validator. If validation
 requires repair, the TikZ repair agent revises the same source and validation
-runs again until it passes or reaches `VISUAL_TIKZ_REPAIR_ATTEMPTS`. The visual
-API returns `tikz_source` only and does not compile LaTeX on the server. This
-keeps the main API fast and avoids a heavy TeX runtime dependency. The text-only
-`/generate` endpoint does not read this visual setting.
+runs again until it passes or reaches `VISUAL_TIKZ_REPAIR_ATTEMPTS`. After that,
+`TikZCompileAgent` chooses allowed LaTeX commands, observes stdout/stderr/logs
+and generated files, and keeps iterating until a PDF is produced or it concludes
+that the TikZ source itself needs repair. The compiled PDF is converted to PNG
+with `pdftoppm`. The text-only `/generate` endpoint does not read these visual
+settings.
+
+The Docker image installs `texlive-full` and `poppler-utils`; `texlive-full`
+covers the LaTeX package surface, while `poppler-utils` provides `pdftoppm` for
+PNG conversion.
 
 If OpenCode Go returns Cloudflare 1010 `browser_signature_banned`, the request
 was blocked before reaching the LLM API. The client sends
@@ -278,6 +304,13 @@ For a PaaS/container platform, bind to all interfaces and use the platform-provi
 
 ```bash
 API_HOST=0.0.0.0 API_PORT="${PORT:-8000}" python3 -m mathgen.api
+```
+
+For Docker deployment with LaTeX rendering:
+
+```bash
+docker build -t gen-study .
+docker run --env-file .env.production -p 8000:8000 gen-study
 ```
 
 If `GEN_STUDY_API_KEY` is set, include either header:
@@ -324,7 +357,8 @@ curl -X POST http://127.0.0.1:8000/visuals/generate \
   -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics","problem":"問題文...","solution":"解答..."}'
 ```
 
-If visuals are needed, the response includes one or more TikZ assets:
+If visuals are needed, the response includes one or more rendered PNG assets
+with the original TikZ source retained:
 
 ```json
 {
@@ -334,18 +368,18 @@ If visuals are needed, the response includes one or more TikZ assets:
   "visual_validation_status": "pass",
   "visual_assets": [
     {
-      "mime_type": "text/x-tex",
+      "mime_type": "image/png",
       "id": "visual_1",
       "placement": "problem",
       "purpose": "diagram",
-      "tikz_source": "\\begin{tikzpicture}...\\end{tikzpicture}"
+      "png_base64": "...",
+      "tikz_source": "\\begin{tikzpicture}...\\end{tikzpicture}",
+      "compile_status": "compiled",
+      "compile_engine": "lualatex"
     }
   ]
 }
 ```
-
-The API does not render or compile the TikZ server-side. Use the GUI or your own
-LaTeX toolchain to inspect the returned source.
 
 With API key authentication enabled:
 

@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+__pycache__
+*.py[cod]
+.pytest_cache
+.env
+.env.local
+.env.production
+visual_request.json
+visual_response.json
+response.json
+*.png
+*.pdf
+*.aux
+*.log
