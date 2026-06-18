@@ -12,6 +12,16 @@ class ViewerTests(unittest.TestCase):
 
         self.assertIn("MathJax", html)
         self.assertIn("tex-svg.js", html)
+        # MathJax is configured to suppress TeX parse errors (noerrors) and
+        # to pre-load the mhchem/physics/boldsymbol extensions so that \ce,
+        # \pu, \boldsymbol, and physics-package macros render instead of
+        # producing "Math input error". processEscapes is set so \$ is a
+        # literal dollar, not a math delimiter.
+        self.assertIn("noerrors", html)
+        self.assertIn("mhchem", html)
+        self.assertIn("physics", html)
+        self.assertIn("boldsymbol", html)
+        self.assertIn("processEscapes", html)
         self.assertIn("./config.js", html)
         self.assertIn("generateForm", html)
         self.assertIn("subjectInput", html)
@@ -54,11 +64,20 @@ class ViewerTests(unittest.TestCase):
         self.assertIn("appendRichText", script)
         self.assertIn("enumerate", script)
         self.assertIn("textbf", script)
+        # The inline $...$ math regex uses a negative lookbehind so escaped
+        # dollars (\$) are not treated as math delimiters, and nested
+        # \textbf/\emph braces are balanced by findMatchingBrace.
+        self.assertIn("lookbehind", script)
+        self.assertIn("findMatchingBrace", script)
         self.assertIn("fetch(apiUrl", script)
         self.assertIn("typesetPromise", script)
         self.assertIn(".generation-form", styles)
         self.assertIn(".latex-list", styles)
         self.assertIn(".rendered-text", styles)
+        # Broken TeX is rendered by MathJax's noerrors extension as an SVG
+        # carrying a data-mjx-error attribute; highlight it so the failed
+        # expression is visible rather than silently malformed.
+        self.assertIn("[data-mjx-error]", styles)
         self.assertIn(".visual-grid", styles)
         self.assertIn(".visual-figure", styles)
         self.assertIn(".visual-image", styles)

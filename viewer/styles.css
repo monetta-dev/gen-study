@@ -245,6 +245,19 @@ button:disabled {
   color: var(--muted);
 }
 
+/* MathJax renders un-parseable TeX as an SVG carrying a data-mjx-error
+ * attribute (produced by the noerrors extension). Highlight it so the
+ * broken expression is obvious rather than blending into surrounding text. */
+.rendered-text [data-mjx-error],
+.process-output [data-mjx-error] {
+  color: var(--error);
+  background: rgba(180, 35, 24, 0.08);
+  border-radius: 3px;
+  padding: 0 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
 .visual-section {
   padding: 18px;
 }

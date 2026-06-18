@@ -7,9 +7,14 @@
     <link rel="stylesheet" href="./styles.css">
     <script>
       window.MathJax = {
+        loader: {
+          load: ["[tex]/noerrors", "[tex]/mhchem", "[tex]/physics", "[tex]/boldsymbol"]
+        },
         tex: {
           inlineMath: [["$", "$"], ["\\(", "\\)"]],
-          displayMath: [["$$", "$$"], ["\\[", "\\]"]]
+          displayMath: [["$$", "$$"], ["\\[", "\\]"]],
+          processEscapes: true,
+          packages: { "[+]": ["noerrors", "mhchem", "physics", "boldsymbol"] }
         },
         svg: { fontCache: "global" }
       };

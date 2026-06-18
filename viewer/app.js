@@ -149,7 +149,17 @@ function normalizeTextLatex(value) {
 
 function appendInlineLatex(container, value) {
   const text = String(value || "");
-  const mathPattern = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$]*?\$)/g;
+  // Math spans:
+  //  - $...$  (display, may span newlines)
+  //  - \[...\]  (display, may span newlines)
+  //  - \(...\)  (inline, may span newlines)
+  //  - $...$    (inline, single line only)
+  // The inline $...$ branch uses a negative lookbehind on both delimiters so
+  // that an escaped "\$" (e.g. "\$100") is never treated as a math boundary,
+  // and an escaped char inside (\.) is consumed so math containing \$ or \\
+  // does not split mid-expression. Newlines are disallowed inside $...$ so
+  // two separate inline expressions on different lines are not merged.
+  const mathPattern = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\\)\$(?:[^$\\\n]|\\.)*?(?<!\\)\$)/g;
   let cursor = 0;
   let match;
 
@@ -163,19 +173,60 @@ function appendInlineLatex(container, value) {
 }
 
 function appendTextCommands(container, value) {
-  const commandPattern = /\\(textbf|emph)\{([^{}]*)\}/g;
+  const text = String(value || "");
+  // Match \textbf{...} / \emph{...} with balanced, nestable braces so that
+  // e.g. "\textbf{a \emph{b} c}" renders correctly. The previous regex
+  // (\\(textbf|emph)\{([^{}]*)\}) stopped at the first inner brace and
+  // truncated the command. A brace-counting scanner is used instead: it
+  // honors escaped braces (\{, \}) and recurses into the captured body so
+  // nested \textbf/\emph are styled too.
+  const commandStart = /\\(textbf|emph)\{/g;
   let cursor = 0;
   let match;
 
-  while ((match = commandPattern.exec(value)) !== null) {
-    appendPlainTextWithLineBreaks(container, value.slice(cursor, match.index));
-    const element = document.createElement(match[1] === "textbf" ? "strong" : "em");
-    element.textContent = match[2];
+  while ((match = commandStart.exec(text)) !== null) {
+    const name = match[1];
+    const bodyStart = match.index + match[0].length;
+    const bodyEnd = findMatchingBrace(text, bodyStart);
+    if (bodyEnd === -1) {
+      // Unbalanced: leave the rest untouched rather than emitting a broken
+      // command. MathJax will still typeset any math that follows.
+      continue;
+    }
+    appendPlainTextWithLineBreaks(container, text.slice(cursor, match.index));
+    const element = document.createElement(name === "textbf" ? "strong" : "em");
+    appendTextCommands(element, text.slice(bodyStart, bodyEnd));
     container.appendChild(element);
-    cursor = match.index + match[0].length;
+    cursor = bodyEnd + 1;
+    commandStart.lastIndex = cursor;
   }
 
-  appendPlainTextWithLineBreaks(container, value.slice(cursor));
+  appendPlainTextWithLineBreaks(container, text.slice(cursor));
+}
+
+// Given text and an index pointing just after an opening "{", return the index
+// of the matching "}", honoring escaped braces (\{, \}) and nested braces.
+// Returns -1 if no matching brace is found.
+function findMatchingBrace(text, afterOpenIndex) {
+  let depth = 1;
+  let i = afterOpenIndex;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "\\") {
+      i += 2; // skip escaped char (\{, \}, \\, etc.)
+      continue;
+    }
+    if (ch === "{") {
+      depth += 1;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return i;
+      }
+    }
+    i += 1;
+  }
+  return -1;
 }
 
 function appendPlainTextWithLineBreaks(container, value) {
