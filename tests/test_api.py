@@ -60,6 +60,33 @@ class FakeHandlerForSendJson:
         raise AssertionError("log_message should not be called when debug_tracebacks is false")
 
 
+class FakeProblemRenderer:
+    def __init__(self):
+        self.calls = []
+
+    def render(self, problem, solution):
+        self.calls.append((problem, solution))
+        return type(
+            "FakeRenderedOutput",
+            (),
+            {
+                "to_dict": lambda self: {
+                    "status": "compiled",
+                    "format": "png",
+                    "assets": [
+                        {
+                            "kind": "problem",
+                            "page": 1,
+                            "title": "問題",
+                            "mime_type": "image/png",
+                            "png_base64": "cHJvYmxlbQ==",
+                        }
+                    ],
+                }
+            },
+        )()
+
+
 class ApiTests(unittest.TestCase):
     def start_server(self, service, **kwargs):
         debug_tracebacks = kwargs.pop("debug_tracebacks", False)
@@ -127,6 +154,34 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["status"], "success")
         self.assertEqual(payload["problem"], "問 $x$")
+
+    def test_generate_endpoint_can_return_rendered_png_output(self):
+        renderer = FakeProblemRenderer()
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient(['{"problem":"問 $x$","solution":"解 $x=1$"}'])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(
+                FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
+            ),
+            ComplianceValidatorAgent(
+                FakeClient(['{"passed":true,"curriculum_compliant":true,"issues":[]}'])
+            ),
+        )
+        server = self.start_server(service, problem_renderer=renderer)
+
+        status, payload = self.post_json(
+            server,
+            {
+                "level": "University of Tokyo",
+                "topic": "Probability Recurrence Relations",
+                "render_output": True,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["rendered_output"]["status"], "compiled")
+        self.assertEqual(payload["rendered_output"]["assets"][0]["mime_type"], "image/png")
+        self.assertEqual(renderer.calls, [("問 $x$", "解 $x=1$")])
 
     def test_generate_endpoint_can_return_process_trace(self):
         tracer = InteractionTracer(capture=True)

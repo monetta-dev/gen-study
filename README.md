@@ -253,6 +253,8 @@ VISUAL_TIKZ_REPAIR_ATTEMPTS=2
 VISUAL_RENDER_ENABLED=true
 VISUAL_COMPILE_TIMEOUT_SECONDS=30
 VISUAL_COMPILE_MAX_ACTIONS=5
+PROBLEM_RENDER_TIMEOUT_SECONDS=40
+PROBLEM_RENDER_DPI=180
 ```
 
 Each visual instruction includes a frozen `visual_contract` generated locally
@@ -271,6 +273,11 @@ and generated files, and keeps iterating until a PDF is produced or it concludes
 that the TikZ source itself needs repair. The compiled PDF is converted to PNG
 with `pdftoppm`. The text-only `/generate` endpoint does not read these visual
 settings.
+
+`POST /generate` can optionally render the final problem and solution as PNG
+pages by including `render_output: true`, `render_png: true`, or
+`include_rendered_output: true` in the request. This uses LuaLaTeX and
+`pdftoppm` in the same Docker runtime and returns `rendered_output.assets`.
 
 The Docker image installs `texlive-full` and `poppler-utils`; `texlive-full`
 covers the LaTeX package surface, while `poppler-utils` provides `pdftoppm` for
@@ -347,6 +354,44 @@ non-negative integer if you need a production cost guardrail.
 curl -X POST http://127.0.0.1:8000/generate \
   -H 'Content-Type: application/json' \
   -d '{"subject":"mathematics","level":"University of Tokyo","topic":"Probability Recurrence Relations"}'
+```
+
+Request rendered PNG pages for distribution:
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate \
+  -H 'Content-Type: application/json' \
+  -d '{"subject":"mathematics","level":"University of Tokyo","topic":"Probability Recurrence Relations","render_output":true}'
+```
+
+The response then includes:
+
+```json
+{
+  "status": "success",
+  "problem": "...",
+  "solution": "...",
+  "rendered_output": {
+    "status": "compiled",
+    "format": "png",
+    "assets": [
+      {
+        "kind": "problem",
+        "page": 1,
+        "title": "問題",
+        "mime_type": "image/png",
+        "png_base64": "..."
+      },
+      {
+        "kind": "solution",
+        "page": 1,
+        "title": "解答",
+        "mime_type": "image/png",
+        "png_base64": "..."
+      }
+    ]
+  }
+}
 ```
 
 Generate a visual asset from a completed problem and solution:

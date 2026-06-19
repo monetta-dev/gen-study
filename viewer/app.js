@@ -13,6 +13,7 @@ const apiUrlInput = document.getElementById("apiUrlInput");
 const visualApiUrlInput = document.getElementById("visualApiUrlInput");
 const apiKeyInput = document.getElementById("apiKeyInput");
 const autoVisualInput = document.getElementById("autoVisualInput");
+const renderOutputInput = document.getElementById("renderOutputInput");
 const sampleButton = document.getElementById("sampleButton");
 const visualButton = document.getElementById("visualButton");
 const generateButton = document.getElementById("generateButton");
@@ -20,6 +21,7 @@ const statusMessage = document.getElementById("statusMessage");
 const problemOutput = document.getElementById("problemOutput");
 const solutionOutput = document.getElementById("solutionOutput");
 const visualOutput = document.getElementById("visualOutput");
+const renderedOutput = document.getElementById("renderedOutput");
 const processOutput = document.getElementById("processOutput");
 const rawOutput = document.getElementById("rawOutput");
 const processSection = document.querySelector(".process-section");
@@ -302,6 +304,12 @@ function resetVisualOutput(message = "No visuals loaded.") {
   currentVisualResponse = null;
 }
 
+function resetRenderedOutput(message = "No rendered PNG loaded.") {
+  clearNode(renderedOutput);
+  renderedOutput.textContent = message;
+  renderedOutput.classList.add("empty");
+}
+
 function resetProcessOutput(message = "No process loaded.") {
   if (!configFlag("showProcess")) {
     return;
@@ -448,6 +456,39 @@ function renderVisualResponse(data) {
   visualOutput.appendChild(grid);
 }
 
+function renderProblemImages(data) {
+  clearNode(renderedOutput);
+  renderedOutput.classList.remove("empty");
+
+  const output = data.rendered_output;
+  const assets = output && Array.isArray(output.assets) ? output.assets : [];
+  if (assets.length === 0) {
+    renderedOutput.textContent = "No rendered PNG was returned.";
+    renderedOutput.classList.add("empty");
+    return;
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "rendered-grid";
+  assets.forEach((asset, index) => {
+    const figure = document.createElement("figure");
+    figure.className = "rendered-figure";
+
+    const image = document.createElement("img");
+    image.className = "rendered-image";
+    image.alt = `${asset.title || asset.kind || "rendered"} page ${asset.page || index + 1}`;
+    image.src = `data:${asset.mime_type || "image/png"};base64,${asset.png_base64}`;
+    figure.appendChild(image);
+
+    const caption = document.createElement("figcaption");
+    caption.textContent = `${asset.title || asset.kind || "Rendered"} · page ${asset.page || index + 1}`;
+    figure.appendChild(caption);
+    grid.appendChild(figure);
+  });
+
+  renderedOutput.appendChild(grid);
+}
+
 async function typeset() {
   if (window.MathJax && window.MathJax.typesetPromise) {
     await window.MathJax.typesetPromise([problemOutput, solutionOutput]);
@@ -461,6 +502,11 @@ async function renderResponse(data) {
     currentTextResponse = data;
     appendRichText(problemOutput, data.problem);
     appendRichText(solutionOutput, data.solution);
+    if (data.rendered_output && data.rendered_output.status === "compiled") {
+      renderProblemImages(data);
+    } else {
+      resetRenderedOutput();
+    }
     renderTraceRecords(data.trace, "Problem Generation", false);
     visualButton.disabled = false;
     setStatus("Generation completed.", "ok");
@@ -470,6 +516,7 @@ async function renderResponse(data) {
     const detail = data.detail || data.reason || data.error || "Generation failed.";
     appendRichText(problemOutput, data.problem);
     appendRichText(solutionOutput, data.solution);
+    resetRenderedOutput();
     setStatus(detail, "error");
   }
 
@@ -486,6 +533,9 @@ function requestPayload() {
     level: levelInput.value.trim(),
     topic: topicInput.value.trim()
   };
+  if (renderOutputInput.checked) {
+    payload.render_output = true;
+  }
   if (configFlag("includeTrace")) {
     payload.trace = true;
   }
@@ -512,6 +562,7 @@ async function generateProblem(event) {
   setLoading(true);
   setStatus("Generating. This can take several minutes.", "");
   resetVisualOutput();
+  resetRenderedOutput(renderOutputInput.checked ? "Rendering PNG..." : "No rendered PNG loaded.");
   resetProcessOutput("Generating...");
 
   try {
@@ -609,6 +660,7 @@ async function fetchJsonResult(apiUrl, headers, payload, label) {
 function loadSample() {
   currentTextResponse = sampleResponse;
   resetVisualOutput();
+  resetRenderedOutput();
   resetProcessOutput();
   renderResponse(sampleResponse);
 }

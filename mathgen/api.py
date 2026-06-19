@@ -30,6 +30,7 @@ from .models import (
     ModelOutputError,
     VisualGenerateRequest,
 )
+from .problem_renderer import ProblemRenderer, ProblemRenderError
 from .visual_agents import (
     TikZGenerationAgent,
     TikZRepairAgent,
@@ -93,6 +94,14 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
         max_repair_attempts=_env_int("VISUAL_TIKZ_REPAIR_ATTEMPTS", 2),
         renderer=renderer,
         tracer=tracer,
+    )
+
+
+def build_problem_renderer() -> ProblemRenderer:
+    load_dotenv()
+    return ProblemRenderer(
+        timeout_seconds=_env_float("PROBLEM_RENDER_TIMEOUT_SECONDS", 40.0),
+        dpi=_env_int("PROBLEM_RENDER_DPI", 180),
     )
 
 
@@ -177,9 +186,20 @@ def _payload_trace_enabled(payload: dict[str, Any]) -> bool:
     return False
 
 
+def _payload_render_enabled(payload: dict[str, Any]) -> bool:
+    for key in ("render_output", "render_png", "include_rendered_output"):
+        value = payload.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 class MathGenerationHandler(BaseHTTPRequestHandler):
     service: MathGenerationService | None = None
     visual_service: VisualGenerationService | None = None
+    problem_renderer: ProblemRenderer | None = None
     debug_tracebacks = False
     api_key = ""
     max_body_bytes = 65536
@@ -231,10 +251,20 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json_body()
             include_trace = _payload_trace_enabled(payload)
+            render_output = _payload_render_enabled(payload)
             request = GenerateRequest.from_dict(payload)
             service = self.service or build_service(capture_trace=include_trace)
             result = service.generate_verified(request)
+            if render_output and result.get("status") == "success":
+                renderer = self.problem_renderer or build_problem_renderer()
+                result["rendered_output"] = renderer.render(
+                    str(result.get("problem", "")),
+                    str(result.get("solution", "")),
+                ).to_dict()
             self._attach_trace(result, service, include_trace)
+        except ProblemRenderError as exc:
+            self._send_render_error(request_id, exc)
+            return
         except ContractError as exc:
             self._send_contract_error(request_id, exc)
             return
@@ -324,6 +354,19 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
                 "status": "error",
                 "error": "llm_output_error",
                 "detail": str(exc),
+                "request_id": request_id,
+            },
+        )
+
+    def _send_render_error(self, request_id: str, exc: ProblemRenderError) -> None:
+        self._log_error(request_id, "render_error", exc)
+        detail = str(exc) if self.debug_tracebacks else "Problem rendering failed"
+        self._send_json(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            {
+                "status": "error",
+                "error": "render_error",
+                "detail": detail,
                 "request_id": request_id,
             },
         )
@@ -455,6 +498,7 @@ def create_server(
     port: int = 8000,
     service: MathGenerationService | None = None,
     visual_service: VisualGenerationService | None = None,
+    problem_renderer: ProblemRenderer | None = None,
     debug_tracebacks: bool = False,
     api_key: str = "",
     max_body_bytes: int = 65536,
@@ -465,6 +509,7 @@ def create_server(
 
     Handler.service = service
     Handler.visual_service = visual_service
+    Handler.problem_renderer = problem_renderer
     Handler.debug_tracebacks = debug_tracebacks
     Handler.api_key = api_key
     Handler.max_body_bytes = max_body_bytes

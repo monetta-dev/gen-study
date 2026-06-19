@@ -39,6 +39,7 @@ select {
 .request-panel,
 .output-section,
 .visual-section,
+.render-section,
 .process-section,
 .raw-panel {
   background: var(--surface);
@@ -262,7 +263,15 @@ button:disabled {
   padding: 18px;
 }
 
+.render-section {
+  padding: 18px;
+}
+
 .visual-output {
+  min-height: 140px;
+}
+
+.rendered-output {
   min-height: 140px;
 }
 
@@ -284,7 +293,20 @@ button:disabled {
   gap: 14px;
 }
 
+.rendered-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
 .visual-figure {
+  margin: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  padding: 12px;
+}
+
+.rendered-figure {
   margin: 0;
   border: 1px solid var(--line);
   background: var(--surface-muted);
@@ -295,6 +317,15 @@ button:disabled {
   display: block;
   width: 100%;
   max-height: 520px;
+  object-fit: contain;
+  background: #ffffff;
+  border: 1px solid var(--line);
+}
+
+.rendered-image {
+  display: block;
+  width: 100%;
+  max-height: 780px;
   object-fit: contain;
   background: #ffffff;
   border: 1px solid var(--line);
@@ -315,6 +346,13 @@ button:disabled {
 }
 
 .visual-figure figcaption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.rendered-figure figcaption {
   margin-top: 8px;
   color: var(--muted);
   font-size: 13px;
