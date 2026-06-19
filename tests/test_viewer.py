@@ -75,6 +75,8 @@ class ViewerTests(unittest.TestCase):
         self.assertIn("lookbehind", script)
         self.assertIn("findMatchingBrace", script)
         self.assertIn("fetch(apiUrl", script)
+        self.assertIn("formatNonJsonResponse", script)
+        self.assertIn("probably reached an HTML page", script)
         self.assertIn("typesetPromise", script)
         self.assertIn(".generation-form", styles)
         self.assertIn(".latex-list", styles)

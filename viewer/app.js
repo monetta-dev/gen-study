@@ -652,9 +652,20 @@ async function fetchJsonResult(apiUrl, headers, payload, label) {
   try {
     data = JSON.parse(text);
   } catch (error) {
-    throw new Error(`${label} returned non-JSON response: ${text.slice(0, 160)}`);
+    throw new Error(formatNonJsonResponse(label, apiUrl, response, text));
   }
   return data;
+}
+
+function formatNonJsonResponse(label, apiUrl, response, text) {
+  const contentType = response.headers.get("Content-Type") || "unknown content type";
+  const excerpt = text ? text.slice(0, 160).replace(/\s+/g, " ").trim() : "empty response";
+  const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(text);
+  const hint = looksLikeHtml
+    ? " The request probably reached an HTML page, proxy error page, or static frontend instead of the JSON API."
+    : "";
+  return `${label} returned non-JSON response from ${apiUrl} ` +
+    `(HTTP ${response.status}, ${contentType}): ${excerpt}.${hint}`;
 }
 
 function loadSample() {
