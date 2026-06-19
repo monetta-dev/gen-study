@@ -25,6 +25,8 @@ const renderedOutput = document.getElementById("renderedOutput");
 const processOutput = document.getElementById("processOutput");
 const rawOutput = document.getElementById("rawOutput");
 const processSection = document.querySelector(".process-section");
+const renderToggle = renderOutputInput ? renderOutputInput.closest(".visual-toggle") : null;
+const renderSection = document.querySelector(".render-section");
 let currentTextResponse = null;
 let currentVisualResponse = null;
 
@@ -533,7 +535,7 @@ function requestPayload() {
     level: levelInput.value.trim(),
     topic: topicInput.value.trim()
   };
-  if (renderOutputInput.checked) {
+  if (configFlag("enableRenderOutput") && renderOutputInput && renderOutputInput.checked) {
     payload.render_output = true;
   }
   if (configFlag("includeTrace")) {
@@ -718,6 +720,18 @@ apiUrlInput.value = defaultApiUrl();
 visualApiUrlInput.value = defaultVisualApiUrl();
 if (processSection && !configFlag("showProcess")) {
   processSection.hidden = true;
+}
+if (!configFlag("enableRenderOutput")) {
+  if (renderToggle) {
+    renderToggle.hidden = true;
+  }
+  if (renderOutputInput) {
+    renderOutputInput.checked = false;
+    renderOutputInput.disabled = true;
+  }
+  if (renderSection) {
+    renderSection.hidden = true;
+  }
 }
 initializeRequestDefaults();
 form.addEventListener("submit", generateProblem);

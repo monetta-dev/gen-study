@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-_DOTENV_KEYS: set[str] = set()
+_DOTENV_VALUES: dict[str, str] = {}
 
 
 def load_dotenv(path: str | Path = ".env.local") -> None:
@@ -21,6 +21,8 @@ def load_dotenv(path: str | Path = ".env.local") -> None:
         key, value = line.split("=", 1)
         key = key.strip()
         value = value.strip().strip('"').strip("'")
-        if key and (key not in os.environ or key in _DOTENV_KEYS):
+        if not key:
+            continue
+        if key not in os.environ or os.environ.get(key) == _DOTENV_VALUES.get(key):
             os.environ[key] = value
-            _DOTENV_KEYS.add(key)
+            _DOTENV_VALUES[key] = value

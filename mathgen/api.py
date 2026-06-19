@@ -456,6 +456,9 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
 
     def _send_static(self) -> None:
         path = self.path.split("?", 1)[0]
+        if path in {"/config.js", "/viewer/config.js"}:
+            self._send_viewer_config()
+            return
         relative_path = "index.html"
         if path.startswith("/viewer/"):
             relative_path = path[len("/viewer/") :] or "index.html"
@@ -483,6 +486,27 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self._send_cors_headers()
         self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_viewer_config(self) -> None:
+        load_dotenv()
+        config = {
+            "apiUrl": _env_string("GUI_API_URL", ""),
+            "visualApiUrl": _env_string("GUI_VISUAL_API_URL", ""),
+            "enableRenderOutput": _env_flag("PROBLEM_RENDER_OUTPUT_ENABLED"),
+            "includeTrace": _env_flag("GUI_INCLUDE_TRACE"),
+            "showProcess": _env_flag("GUI_SHOW_PROCESS"),
+            "showFullRawResponse": _env_flag("GUI_SHOW_FULL_RAW_RESPONSE"),
+        }
+        body = (
+            "window.GEN_STUDY_CONFIG = "
+            f"{json.dumps(config, ensure_ascii=False, indent=2)};\n"
+        ).encode("utf-8")
+        self.send_response(HTTPStatus.OK)
+        self._send_cors_headers()
+        self.send_header("Content-Type", "application/javascript; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

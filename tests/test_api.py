@@ -509,6 +509,29 @@ class ApiTests(unittest.TestCase):
         self.assertIn("text/html", headers["Content-Type"])
         self.assertIn("generateForm", body)
 
+    def test_config_js_uses_render_output_environment_flag(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        previous = os.environ.get("PROBLEM_RENDER_OUTPUT_ENABLED")
+        os.environ["PROBLEM_RENDER_OUTPUT_ENABLED"] = "true"
+        try:
+            server = self.start_server(service)
+
+            status, headers, body = self.get(server, "/config.js")
+        finally:
+            if previous is None:
+                os.environ.pop("PROBLEM_RENDER_OUTPUT_ENABLED", None)
+            else:
+                os.environ["PROBLEM_RENDER_OUTPUT_ENABLED"] = previous
+
+        self.assertEqual(status, 200)
+        self.assertIn("application/javascript", headers["Content-Type"])
+        self.assertIn('"enableRenderOutput": true', body)
+
     def test_options_returns_cors_headers(self):
         service = MathGenerationService(
             GeneratorAgent(FakeClient([])),

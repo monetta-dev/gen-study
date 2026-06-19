@@ -488,16 +488,18 @@ The viewer uses MathJax from a CDN, so LaTeX rendering needs browser access to
 that script. The raw text still displays if MathJax is unavailable.
 
 By default, the GUI is production-safe: it does not request process traces, hides
-the process panel, and the plain-text panel shows only the final problem and
-solution before MathJax rendering. For local debugging, edit `viewer/config.js`:
+the process panel, hides the full problem/solution PNG rendering option, and the
+plain-text panel shows only the final problem and solution before MathJax
+rendering. Enable development-only GUI features with environment variables:
 
-```js
-window.GEN_STUDY_CONFIG = {
-  includeTrace: true,
-  showProcess: true,
-  showFullRawResponse: true
-};
+```dotenv
+PROBLEM_RENDER_OUTPUT_ENABLED=true
+GUI_INCLUDE_TRACE=true
+GUI_SHOW_PROCESS=true
+GUI_SHOW_FULL_RAW_RESPONSE=true
 ```
+
+Keep `PROBLEM_RENDER_OUTPUT_ENABLED=false` on 512 MB Render services.
 
 ## Test
 
