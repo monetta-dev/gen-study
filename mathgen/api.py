@@ -100,7 +100,7 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
 def build_problem_renderer() -> ProblemRenderer:
     load_dotenv()
     return ProblemRenderer(
-        timeout_seconds=_env_float("PROBLEM_RENDER_TIMEOUT_SECONDS", 40.0),
+        timeout_seconds=_env_float("PROBLEM_RENDER_TIMEOUT_SECONDS", 180.0),
         dpi=_env_int("PROBLEM_RENDER_DPI", 180),
     )
 

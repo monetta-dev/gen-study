@@ -47,7 +47,7 @@ class RenderedProblemOutput:
 
 
 class ProblemRenderer:
-    def __init__(self, timeout_seconds: float = 40.0, dpi: int = 180) -> None:
+    def __init__(self, timeout_seconds: float = 180.0, dpi: int = 180) -> None:
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         if dpi <= 0:
@@ -117,14 +117,19 @@ def _run_lualatex(workdir: Path, timeout_seconds: float) -> None:
         "-halt-on-error",
         "main.tex",
     ]
-    completed = subprocess.run(
-        command,
-        cwd=workdir,
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ProblemRenderError(
+            f"LaTeX rendering timed out after {timeout_seconds:.1f} seconds"
+        ) from exc
     if completed.returncode != 0:
         log_path = workdir / "main.log"
         log_excerpt = ""
@@ -142,21 +147,26 @@ def _pdf_to_png_pages(
     if not shutil.which("pdftoppm"):
         raise ProblemRenderError("`pdftoppm` is not installed")
     output_prefix = workdir / "page"
-    completed = subprocess.run(
-        [
-            "pdftoppm",
-            "-png",
-            "-r",
-            str(dpi),
-            str(pdf_path),
-            str(output_prefix),
-        ],
-        cwd=workdir,
-        capture_output=True,
-        text=True,
-        timeout=timeout_seconds,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                "pdftoppm",
+                "-png",
+                "-r",
+                str(dpi),
+                str(pdf_path),
+                str(output_prefix),
+            ],
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ProblemRenderError(
+            f"PDF to PNG conversion timed out after {timeout_seconds:.1f} seconds"
+        ) from exc
     paths = sorted(workdir.glob("page-*.png"))
     if completed.returncode != 0 or not paths:
         raise ProblemRenderError(

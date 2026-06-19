@@ -1,6 +1,16 @@
+import subprocess
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
-from mathgen.problem_renderer import RenderedPage, RenderedProblemOutput, _document
+from mathgen.problem_renderer import (
+    ProblemRenderError,
+    RenderedPage,
+    RenderedProblemOutput,
+    _document,
+    _run_lualatex,
+)
 
 
 class ProblemRendererTests(unittest.TestCase):
@@ -27,6 +37,18 @@ class ProblemRendererTests(unittest.TestCase):
         )
 
         self.assertEqual(output.to_dict()["assets"][0]["kind"], "problem")
+
+    def test_lualatex_timeout_is_render_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch("shutil.which", return_value="/usr/bin/lualatex"):
+                with patch(
+                    "subprocess.run",
+                    side_effect=subprocess.TimeoutExpired("lualatex", 180),
+                ):
+                    with self.assertRaisesRegex(
+                        ProblemRenderError, "LaTeX rendering timed out"
+                    ):
+                        _run_lualatex(Path(tmpdir), 180)
 
 
 if __name__ == "__main__":
