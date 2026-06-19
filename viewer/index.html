@@ -96,8 +96,8 @@
               <input id="autoVisualInput" name="autoVisual" type="checkbox">
               <span>Generate visuals</span>
             </label>
-            <label class="visual-toggle">
-              <input id="renderOutputInput" name="renderOutput" type="checkbox">
+            <label class="visual-toggle" id="renderOutputToggle" hidden>
+              <input id="renderOutputInput" name="renderOutput" type="checkbox" disabled>
               <span>Render PNG</span>
             </label>
             <button id="sampleButton" type="button">Load Sample</button>
@@ -126,7 +126,7 @@
         <div id="visualOutput" class="visual-output empty">No visuals loaded.</div>
       </section>
 
-      <section class="render-section" aria-label="Rendered PNG output">
+      <section class="render-section" aria-label="Rendered PNG output" hidden>
         <div class="section-label">Rendered PNG</div>
         <div id="renderedOutput" class="rendered-output empty">No rendered PNG loaded.</div>
       </section>

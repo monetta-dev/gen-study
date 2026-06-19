@@ -25,7 +25,9 @@ const renderedOutput = document.getElementById("renderedOutput");
 const processOutput = document.getElementById("processOutput");
 const rawOutput = document.getElementById("rawOutput");
 const processSection = document.querySelector(".process-section");
-const renderToggle = renderOutputInput ? renderOutputInput.closest(".visual-toggle") : null;
+const renderToggle =
+  document.getElementById("renderOutputToggle") ||
+  (renderOutputInput ? renderOutputInput.closest(".visual-toggle") : null);
 const renderSection = document.querySelector(".render-section");
 let currentTextResponse = null;
 let currentVisualResponse = null;
@@ -721,16 +723,19 @@ visualApiUrlInput.value = defaultVisualApiUrl();
 if (processSection && !configFlag("showProcess")) {
   processSection.hidden = true;
 }
-if (!configFlag("enableRenderOutput")) {
+if (configFlag("enableRenderOutput")) {
   if (renderToggle) {
-    renderToggle.hidden = true;
+    renderToggle.hidden = false;
   }
   if (renderOutputInput) {
-    renderOutputInput.checked = false;
-    renderOutputInput.disabled = true;
+    renderOutputInput.disabled = false;
   }
   if (renderSection) {
-    renderSection.hidden = true;
+    renderSection.hidden = false;
+  }
+} else {
+  if (renderOutputInput) {
+    renderOutputInput.checked = false;
   }
 }
 initializeRequestDefaults();
