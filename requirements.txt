@@ -1,2 +1,2 @@
-# Runtime dependencies for Render.
-# This project currently uses only the Python standard library.
+# Runtime dependencies for Render and local development.
+Pillow>=10.0

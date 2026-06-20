@@ -35,6 +35,26 @@ class JsonUtilsTests(unittest.TestCase):
             {"prompt": "line 1\nline 2"},
         )
 
+    def test_escapes_raw_latex_backslashes_inside_strings(self):
+        parsed = parse_json_object(
+            '{"issues":["The formula $\\sum_{k=0}^{\\infty} \\frac{1}{k!}=e$ is outside scope."]}'
+        )
+
+        self.assertEqual(
+            parsed,
+            {
+                "issues": [
+                    "The formula $\\sum_{k=0}^{\\infty} \\frac{1}{k!}=e$ is outside scope."
+                ]
+            },
+        )
+
+    def test_preserves_valid_json_escapes_inside_strings(self):
+        self.assertEqual(
+            parse_json_object('{"prompt":"line 1\\nline 2","quote":"\\"x\\""}'),
+            {"prompt": "line 1\nline 2", "quote": '"x"'},
+        )
+
     def test_rejects_missing_json_object(self):
         with self.assertRaisesRegex(ContractError, "did not contain"):
             parse_json_object("not json")

@@ -40,6 +40,7 @@ select {
 .output-section,
 .visual-section,
 .render-section,
+.composite-section,
 .process-section,
 .raw-panel {
   background: var(--surface);
@@ -263,7 +264,8 @@ button:disabled {
   padding: 18px;
 }
 
-.render-section {
+.render-section,
+.composite-section {
   padding: 18px;
 }
 

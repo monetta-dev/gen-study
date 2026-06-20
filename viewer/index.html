@@ -102,6 +102,7 @@
             </label>
             <button id="sampleButton" type="button">Load Sample</button>
             <button id="visualButton" type="button" disabled>Generate Visuals</button>
+            <button id="compositeButton" type="button" disabled hidden>Create Composite PNG</button>
             <button id="generateButton" type="submit">Generate</button>
           </div>
         </form>
@@ -129,6 +130,11 @@
       <section class="render-section" aria-label="Rendered PNG output" hidden>
         <div class="section-label">Rendered PNG</div>
         <div id="renderedOutput" class="rendered-output empty">No rendered PNG loaded.</div>
+      </section>
+
+      <section class="composite-section" aria-label="Composite PNG output" hidden>
+        <div class="section-label">Composite PNG</div>
+        <div id="compositeOutput" class="rendered-output empty">No composite PNG loaded.</div>
       </section>
 
       <section class="process-section" aria-label="Generation process">

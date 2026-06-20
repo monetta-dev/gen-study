@@ -22,6 +22,11 @@ from .agents import (
     MathGenerationService,
     RepairAgent,
 )
+from .composite_renderer import (
+    CompositeLayoutAgent,
+    CompositeRenderError,
+    CompositeRenderService,
+)
 from .env import load_dotenv
 from .llm import LLMError, OpenCodeGoClient
 from .models import (
@@ -102,6 +107,19 @@ def build_problem_renderer() -> ProblemRenderer:
     return ProblemRenderer(
         timeout_seconds=_env_float("PROBLEM_RENDER_TIMEOUT_SECONDS", 180.0),
         dpi=_env_int("PROBLEM_RENDER_DPI", 180),
+    )
+
+
+def build_composite_service(capture_trace: bool = False) -> CompositeRenderService:
+    load_dotenv()
+    tracer = InteractionTracer(
+        enabled=_env_flag("GENERATION_TRACE"),
+        capture=capture_trace,
+    )
+    composite_client = _opencode_client_for_role("COMPOSITE_LAYOUT")
+    return CompositeRenderService(
+        layout_agent=CompositeLayoutAgent(composite_client, tracer=tracer),
+        tracer=tracer,
     )
 
 
@@ -200,6 +218,7 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
     service: MathGenerationService | None = None
     visual_service: VisualGenerationService | None = None
     problem_renderer: ProblemRenderer | None = None
+    composite_service: CompositeRenderService | None = None
     debug_tracebacks = False
     api_key = ""
     max_body_bytes = 65536
@@ -237,6 +256,12 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/visuals/generate":
             self._handle_visual_generate(request_id)
+            return
+        if self.path == "/render/composite":
+            self._handle_composite_render(request_id)
+            return
+        if self.path == "/dev/generate-full":
+            self._handle_dev_generate_full(request_id)
             return
         self._send_json(HTTPStatus.NOT_FOUND, {"status": "error", "error": "not_found"})
 
@@ -320,6 +345,158 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
         status = HTTPStatus.OK if result.get("status") == "success" else HTTPStatus.UNPROCESSABLE_ENTITY
         self._send_json(status, result)
 
+    def _handle_composite_render(self, request_id: str) -> None:
+        if not _env_flag("COMPOSITE_RENDER_ENABLED"):
+            self._send_json(
+                HTTPStatus.NOT_FOUND,
+                {"status": "error", "error": "not_found", "request_id": request_id},
+            )
+            return
+        if not self._is_authorized():
+            self._send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"status": "error", "error": "unauthorized"},
+            )
+            return
+
+        try:
+            payload = self._read_json_body()
+            include_trace = _payload_trace_enabled(payload)
+            service = self.composite_service or build_composite_service(
+                capture_trace=include_trace
+            )
+            result = service.render_composite(payload)
+            self._attach_trace(result, service, include_trace)
+        except CompositeRenderError as exc:
+            self._send_composite_render_error(request_id, exc)
+            return
+        except ContractError as exc:
+            self._send_contract_error(request_id, exc)
+            return
+        except LLMError as exc:
+            self._send_llm_error(request_id, exc)
+            return
+        except ModelOutputError as exc:
+            self._send_model_output_error(request_id, exc)
+            return
+        except json.JSONDecodeError:
+            self._send_json_error(request_id)
+            return
+        except Exception as exc:
+            self._send_internal_error(request_id, exc)
+            return
+
+        status = HTTPStatus.OK if result.get("status") == "success" else HTTPStatus.UNPROCESSABLE_ENTITY
+        self._send_json(status, result)
+
+    def _handle_dev_generate_full(self, request_id: str) -> None:
+        if not _env_flag("COMPOSITE_RENDER_ENABLED"):
+            self._send_json(
+                HTTPStatus.NOT_FOUND,
+                {"status": "error", "error": "not_found", "request_id": request_id},
+            )
+            return
+        if not self._is_authorized():
+            self._send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"status": "error", "error": "unauthorized"},
+            )
+            return
+
+        try:
+            payload = self._read_json_body()
+            include_trace = _payload_trace_enabled(payload)
+            request = GenerateRequest.from_dict(payload)
+
+            generation_service = self.service or build_service(
+                capture_trace=include_trace
+            )
+            generation = generation_service.generate_verified(request)
+            self._attach_trace(generation, generation_service, include_trace)
+            if generation.get("status") != "success":
+                self._send_json(
+                    HTTPStatus.UNPROCESSABLE_ENTITY,
+                    {
+                        "status": "failed",
+                        "stage": "generate",
+                        "generation": generation,
+                    },
+                )
+                return
+
+            renderer = self.problem_renderer or build_problem_renderer()
+            generation["rendered_output"] = renderer.render(
+                str(generation.get("problem", "")),
+                str(generation.get("solution", "")),
+            ).to_dict()
+
+            visual_request = VisualGenerateRequest(
+                problem=str(generation.get("problem", "")),
+                solution=str(generation.get("solution", "")),
+                subject=request.subject,
+                level=request.level,
+                topic=request.topic,
+            )
+            visual_service = self.visual_service or build_visual_service(
+                capture_trace=include_trace
+            )
+            visuals = visual_service.generate_visual(visual_request)
+            self._attach_trace(visuals, visual_service, include_trace)
+            if visuals.get("status") != "success":
+                self._send_json(
+                    HTTPStatus.UNPROCESSABLE_ENTITY,
+                    {
+                        "status": "failed",
+                        "stage": "visuals",
+                        "generation": generation,
+                        "visuals": visuals,
+                    },
+                )
+                return
+
+            composite_service = self.composite_service or build_composite_service(
+                capture_trace=include_trace
+            )
+            composite = composite_service.render_composite(
+                {
+                    "problem": generation.get("problem", ""),
+                    "solution": generation.get("solution", ""),
+                    "rendered_output": generation.get("rendered_output"),
+                    "visual_assets": visuals.get("visual_assets", []),
+                }
+            )
+            self._attach_trace(composite, composite_service, include_trace)
+            result = {
+                "status": "success",
+                "stage": "complete",
+                "generation": generation,
+                "visuals": visuals,
+                "composite": composite,
+            }
+        except ProblemRenderError as exc:
+            self._send_render_error(request_id, exc)
+            return
+        except CompositeRenderError as exc:
+            self._send_composite_render_error(request_id, exc)
+            return
+        except ContractError as exc:
+            self._send_contract_error(request_id, exc)
+            return
+        except LLMError as exc:
+            self._send_llm_error(request_id, exc)
+            return
+        except ModelOutputError as exc:
+            self._send_model_output_error(request_id, exc)
+            return
+        except json.JSONDecodeError:
+            self._send_json_error(request_id)
+            return
+        except Exception as exc:
+            self._send_internal_error(request_id, exc)
+            return
+
+        self._send_json(HTTPStatus.OK, result)
+
     def _send_contract_error(self, request_id: str, exc: ContractError) -> None:
         self._log_error(request_id, "invalid_request", exc)
         self._send_json(
@@ -366,6 +543,21 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
             {
                 "status": "error",
                 "error": "render_error",
+                "detail": detail,
+                "request_id": request_id,
+            },
+        )
+
+    def _send_composite_render_error(
+        self, request_id: str, exc: CompositeRenderError
+    ) -> None:
+        self._log_error(request_id, "composite_render_error", exc)
+        detail = str(exc) if self.debug_tracebacks else "Composite rendering failed"
+        self._send_json(
+            HTTPStatus.INTERNAL_SERVER_ERROR,
+            {
+                "status": "error",
+                "error": "composite_render_error",
                 "detail": detail,
                 "request_id": request_id,
             },
@@ -496,6 +688,7 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
             "apiUrl": _env_string("GUI_API_URL", ""),
             "visualApiUrl": _env_string("GUI_VISUAL_API_URL", ""),
             "enableRenderOutput": _env_flag("PROBLEM_RENDER_OUTPUT_ENABLED"),
+            "enableCompositeRender": _env_flag("COMPOSITE_RENDER_ENABLED"),
             "includeTrace": _env_flag("GUI_INCLUDE_TRACE"),
             "showProcess": _env_flag("GUI_SHOW_PROCESS"),
             "showFullRawResponse": _env_flag("GUI_SHOW_FULL_RAW_RESPONSE"),
@@ -523,6 +716,7 @@ def create_server(
     service: MathGenerationService | None = None,
     visual_service: VisualGenerationService | None = None,
     problem_renderer: ProblemRenderer | None = None,
+    composite_service: CompositeRenderService | None = None,
     debug_tracebacks: bool = False,
     api_key: str = "",
     max_body_bytes: int = 65536,
@@ -534,6 +728,7 @@ def create_server(
     Handler.service = service
     Handler.visual_service = visual_service
     Handler.problem_renderer = problem_renderer
+    Handler.composite_service = composite_service
     Handler.debug_tracebacks = debug_tracebacks
     Handler.api_key = api_key
     Handler.max_body_bytes = max_body_bytes

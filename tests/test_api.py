@@ -87,6 +87,81 @@ class FakeProblemRenderer:
         )()
 
 
+class FakeCompositeService:
+    tracer = type("FakeTracer", (), {"to_response": lambda self: ["composite trace"]})()
+
+    def __init__(self):
+        self.calls = []
+
+    def render_composite(self, payload):
+        self.calls.append(payload)
+        return {
+            "status": "success",
+            "composite_assets": [
+                {
+                    "kind": "problem",
+                    "mime_type": "image/png",
+                    "png_base64": "cHJvYmxlbQ==",
+                },
+                {
+                    "kind": "solution",
+                    "mime_type": "image/png",
+                    "png_base64": "c29sdXRpb24=",
+                },
+            ],
+            "layout_decision": {"status": "test", "placements": [], "notes": ""},
+        }
+
+
+class FakeFullPipelineProblemRenderer:
+    def render(self, problem, solution):
+        return type(
+            "FakeRenderedOutput",
+            (),
+            {
+                "to_dict": lambda self: {
+                    "status": "compiled",
+                    "format": "png",
+                    "assets": [
+                        {
+                            "kind": "problem",
+                            "page": 1,
+                            "title": "問題",
+                            "mime_type": "image/png",
+                            "png_base64": "cHJvYmxlbQ==",
+                        },
+                        {
+                            "kind": "solution",
+                            "page": 1,
+                            "title": "解答",
+                            "mime_type": "image/png",
+                            "png_base64": "c29sdXRpb24=",
+                        },
+                    ],
+                }
+            },
+        )()
+
+
+class FakeFullPipelineVisualService:
+    tracer = type("FakeTracer", (), {"to_response": lambda self: []})()
+
+    def generate_visual(self, request):
+        return {
+            "status": "success",
+            "visual_needed": True,
+            "visual_assets": [
+                {
+                    "id": "visual_1",
+                    "placement": "problem",
+                    "purpose": "diagram",
+                    "mime_type": "image/png",
+                    "png_base64": "dmlzdWFs",
+                }
+            ],
+        }
+
+
 class ApiTests(unittest.TestCase):
     def start_server(self, service, **kwargs):
         debug_tracebacks = kwargs.pop("debug_tracebacks", False)
@@ -531,6 +606,136 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("application/javascript", headers["Content-Type"])
         self.assertIn('"enableRenderOutput": true', body)
+
+    def test_composite_render_endpoint_is_hidden_when_disabled(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        previous = os.environ.get("COMPOSITE_RENDER_ENABLED")
+        os.environ["COMPOSITE_RENDER_ENABLED"] = "false"
+        try:
+            server = self.start_server(service, composite_service=FakeCompositeService())
+
+            with self.assertRaises(urllib.error.HTTPError) as context:
+                self.post_json(
+                    server,
+                    {"problem": "問", "solution": "解"},
+                    path="/render/composite",
+                )
+            context.exception.close()
+        finally:
+            if previous is None:
+                os.environ.pop("COMPOSITE_RENDER_ENABLED", None)
+            else:
+                os.environ["COMPOSITE_RENDER_ENABLED"] = previous
+
+        self.assertEqual(context.exception.code, 404)
+
+    def test_composite_render_endpoint_returns_assets_when_enabled(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        composite_service = FakeCompositeService()
+        previous = os.environ.get("COMPOSITE_RENDER_ENABLED")
+        os.environ["COMPOSITE_RENDER_ENABLED"] = "true"
+        try:
+            server = self.start_server(
+                service,
+                composite_service=composite_service,
+            )
+
+            status, payload = self.post_json(
+                server,
+                {"problem": "問", "solution": "解", "trace": True},
+                path="/render/composite",
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("COMPOSITE_RENDER_ENABLED", None)
+            else:
+                os.environ["COMPOSITE_RENDER_ENABLED"] = previous
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["composite_assets"][0]["kind"], "problem")
+        self.assertEqual(composite_service.calls[0]["problem"], "問")
+
+    def test_dev_generate_full_endpoint_is_hidden_when_disabled(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient([])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(FakeClient([])),
+            ComplianceValidatorAgent(FakeClient([])),
+        )
+        previous = os.environ.get("COMPOSITE_RENDER_ENABLED")
+        os.environ["COMPOSITE_RENDER_ENABLED"] = "false"
+        try:
+            server = self.start_server(service)
+
+            with self.assertRaises(urllib.error.HTTPError) as context:
+                self.post_json(
+                    server,
+                    {"level": "University of Tokyo", "topic": "Mechanics"},
+                    path="/dev/generate-full",
+                )
+            context.exception.close()
+        finally:
+            if previous is None:
+                os.environ.pop("COMPOSITE_RENDER_ENABLED", None)
+            else:
+                os.environ["COMPOSITE_RENDER_ENABLED"] = previous
+
+        self.assertEqual(context.exception.code, 404)
+
+    def test_dev_generate_full_endpoint_runs_existing_services(self):
+        service = MathGenerationService(
+            GeneratorAgent(FakeClient(['{"problem":"問","solution":"解"}'])),
+            RepairAgent(FakeClient([])),
+            CriticalValidatorAgent(
+                FakeClient(['{"passed":true,"solution_accurate":true,"issues":[]}'])
+            ),
+            ComplianceValidatorAgent(
+                FakeClient(['{"passed":true,"curriculum_compliant":true,"issues":[]}'])
+            ),
+        )
+        composite_service = FakeCompositeService()
+        previous = os.environ.get("COMPOSITE_RENDER_ENABLED")
+        os.environ["COMPOSITE_RENDER_ENABLED"] = "true"
+        try:
+            server = self.start_server(
+                service,
+                visual_service=FakeFullPipelineVisualService(),
+                problem_renderer=FakeFullPipelineProblemRenderer(),
+                composite_service=composite_service,
+            )
+
+            status, payload = self.post_json(
+                server,
+                {
+                    "subject": "physics",
+                    "level": "University of Tokyo",
+                    "topic": "Mechanics",
+                },
+                path="/dev/generate-full",
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("COMPOSITE_RENDER_ENABLED", None)
+            else:
+                os.environ["COMPOSITE_RENDER_ENABLED"] = previous
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["stage"], "complete")
+        self.assertEqual(payload["generation"]["rendered_output"]["status"], "compiled")
+        self.assertEqual(payload["visuals"]["visual_assets"][0]["id"], "visual_1")
+        self.assertEqual(payload["composite"]["composite_assets"][0]["kind"], "problem")
 
     def test_options_returns_cors_headers(self):
         service = MathGenerationService(

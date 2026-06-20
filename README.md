@@ -82,12 +82,14 @@ VISUAL_TIKZ_MODEL=
 VISUAL_TIKZ_COMPILE_MODEL=
 VISUAL_TIKZ_VALIDATOR_MODEL=
 VISUAL_TIKZ_REPAIR_MODEL=
+COMPOSITE_LAYOUT_MODEL=
 GENERATOR_MAX_TOKENS=
 GENERATOR_THINKING_BUDGET_TOKENS=
 REPAIR_THINKING_BUDGET_TOKENS=
 CRITICAL_VALIDATOR_THINKING_BUDGET_TOKENS=
 COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS=
 VISUAL_INSTRUCTION_THINKING_BUDGET_TOKENS=
+COMPOSITE_LAYOUT_THINKING_BUDGET_TOKENS=
 VISUAL_TIKZ_THINKING_BUDGET_TOKENS=
 VISUAL_TIKZ_COMPILE_THINKING_BUDGET_TOKENS=
 VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS=
@@ -240,6 +242,7 @@ VISUAL_TIKZ_MODEL
 VISUAL_TIKZ_COMPILE_MODEL
 VISUAL_TIKZ_VALIDATOR_MODEL
 VISUAL_TIKZ_REPAIR_MODEL
+COMPOSITE_LAYOUT_MODEL
 ```
 
 For visual generation, the API first asks a visual instruction agent whether a
@@ -255,6 +258,7 @@ VISUAL_COMPILE_TIMEOUT_SECONDS=30
 VISUAL_COMPILE_MAX_ACTIONS=5
 PROBLEM_RENDER_TIMEOUT_SECONDS=180
 PROBLEM_RENDER_DPI=180
+COMPOSITE_RENDER_ENABLED=false
 ```
 
 Each visual instruction includes a frozen `visual_contract` generated locally
@@ -451,6 +455,19 @@ curl -X POST http://127.0.0.1:8000/generate \
   -d '{"subject":"chemistry","level":"University of Tokyo","topic":"Acid-Base Titration"}'
 ```
 
+Development full-pipeline example:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8000/dev/generate-full \
+  -H 'Content-Type: application/json' \
+  -d '{"subject":"physics","level":"University of Tokyo","topic":"Mechanics"}' \
+  -o full_response.json
+```
+
+This endpoint is available only when `COMPOSITE_RENDER_ENABLED=true`. It
+generates the text, renders problem/solution PNGs, generates visual PNGs, and
+creates composite problem/solution PNGs in one request.
+
 ## Successful Response
 
 ```json
@@ -494,12 +511,14 @@ rendering. Enable development-only GUI features with environment variables:
 
 ```dotenv
 PROBLEM_RENDER_OUTPUT_ENABLED=true
+COMPOSITE_RENDER_ENABLED=true
 GUI_INCLUDE_TRACE=true
 GUI_SHOW_PROCESS=true
 GUI_SHOW_FULL_RAW_RESPONSE=true
 ```
 
-Keep `PROBLEM_RENDER_OUTPUT_ENABLED=false` on 512 MB Render services.
+Keep `PROBLEM_RENDER_OUTPUT_ENABLED=false` and `COMPOSITE_RENDER_ENABLED=false`
+on 512 MB Render services.
 
 ## Test
 

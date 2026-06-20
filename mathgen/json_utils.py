@@ -60,19 +60,104 @@ def _parse_json_like(text: str) -> Any:
 
 def _json_candidates(text: str) -> tuple[str, ...]:
     no_trailing_commas = re.sub(r",\s*([}\]])", r"\1", text)
+    escaped_latex = _escape_latex_commands_in_strings(text)
+    escaped_latex_without_trailing = _escape_latex_commands_in_strings(
+        no_trailing_commas
+    )
     escaped_controls = _escape_control_chars_in_strings(text)
     escaped_without_trailing = _escape_control_chars_in_strings(no_trailing_commas)
+    escaped_invalid = _escape_invalid_json_escapes_in_strings(text)
+    escaped_invalid_without_trailing = _escape_invalid_json_escapes_in_strings(
+        no_trailing_commas
+    )
+    normalized = _escape_invalid_json_escapes_in_strings(escaped_controls)
+    normalized_without_trailing = _escape_invalid_json_escapes_in_strings(
+        escaped_without_trailing
+    )
 
     candidates = []
     for candidate in (
+        escaped_latex,
+        escaped_latex_without_trailing,
         text,
         no_trailing_commas,
         escaped_controls,
         escaped_without_trailing,
+        escaped_invalid,
+        escaped_invalid_without_trailing,
+        normalized,
+        normalized_without_trailing,
     ):
         if candidate not in candidates:
             candidates.append(candidate)
     return tuple(candidates)
+
+
+def _escape_latex_commands_in_strings(text: str) -> str:
+    output = []
+    in_string = False
+    escaped = False
+    index = 0
+    latex_commands = {
+        "alpha",
+        "beta",
+        "cdot",
+        "dfrac",
+        "displaystyle",
+        "frac",
+        "gamma",
+        "infty",
+        "lambda",
+        "left",
+        "ldots",
+        "lim",
+        "neq",
+        "omega",
+        "pi",
+        "right",
+        "sqrt",
+        "sum",
+        "theta",
+        "times",
+        "to",
+    }
+
+    while index < len(text):
+        char = text[index]
+        if escaped:
+            output.append(char)
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and in_string:
+            command = _latex_command_at(text, index + 1)
+            if command in latex_commands:
+                output.append("\\\\")
+                output.append(command)
+                index += len(command) + 1
+                continue
+            output.append(char)
+            escaped = True
+            index += 1
+            continue
+        if char == '"':
+            output.append(char)
+            in_string = not in_string
+            index += 1
+            continue
+        output.append(char)
+        index += 1
+
+    if escaped:
+        output.append("\\")
+    return "".join(output)
+
+
+def _latex_command_at(text: str, start: int) -> str:
+    end = start
+    while end < len(text) and text[end].isalpha():
+        end += 1
+    return text[start:end]
 
 
 def _escape_control_chars_in_strings(text: str) -> str:
@@ -109,3 +194,34 @@ def _escaped_control_char(char: str) -> str:
     if char == "\t":
         return "\\t"
     return f"\\u{ord(char):04x}"
+
+
+def _escape_invalid_json_escapes_in_strings(text: str) -> str:
+    output = []
+    in_string = False
+    escaped = False
+    valid_escapes = {'"', "\\", "/", "b", "f", "n", "r", "t", "u"}
+
+    for char in text:
+        if escaped:
+            if char in valid_escapes:
+                output.append(char)
+            else:
+                output.append("\\")
+                output.append(char)
+            escaped = False
+            continue
+        if char == "\\" and in_string:
+            output.append(char)
+            escaped = True
+            continue
+        if char == '"':
+            output.append(char)
+            in_string = not in_string
+            continue
+        output.append(char)
+
+    if escaped:
+        output.append("\\")
+
+    return "".join(output)
