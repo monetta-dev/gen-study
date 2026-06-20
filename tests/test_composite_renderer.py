@@ -8,6 +8,7 @@ from mathgen.composite_renderer import (
     CompositeAsset,
     CompositeLayoutAgent,
     CompositeRenderService,
+    composite_layout_system_prompt,
 )
 
 
@@ -27,6 +28,13 @@ def tiny_png_base64(color="white"):
 
 
 class CompositeRendererTests(unittest.TestCase):
+    def test_composite_prompt_reclassifies_answer_revealing_visuals(self):
+        prompt = composite_layout_system_prompt()
+
+        self.assertIn("Do not trust a visual's existing placement metadata blindly", prompt)
+        self.assertIn("depicts that target result", prompt)
+        self.assertIn("Problem-side visuals may show the setup", prompt)
+
     def test_answer_revealing_visual_is_moved_off_problem_side(self):
         agent = CompositeLayoutAgent(
             FakeClient(

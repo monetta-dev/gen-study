@@ -136,6 +136,9 @@ When uncertain, place the visual on the solution side.
 Rendered problem text pages must go on the problem side.
 Rendered solution text pages must go on the solution side.
 Only place diagrams/graphs on the problem side when they merely communicate given conditions and do not lower the intended difficulty.
+Do not trust a visual's existing placement metadata blindly. Reclassify it by comparing the visual purpose/placement to the problem statement and solution.
+If the problem asks the student to prove, derive, determine, find, graph, predict, identify, or explain something, a visual that already depicts that target result, relation, final state, construction, mechanism, or proof cue must be placed on the solution side.
+Problem-side visuals may show the setup, known objects, labels, axes, apparatus, and explicitly given conditions, but must omit derived or answer-revealing features.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {"placements":[{"source_id":"...","target":"problem|solution|both|unused","reason":"...","reveal_risk":"safe_given_condition|minor_hint|answer_revealing|unknown"}],"notes":"..."}"""

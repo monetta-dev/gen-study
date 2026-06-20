@@ -36,6 +36,11 @@ The prompt must be detailed enough to generate a precise Japanese university ent
 Prefer monochrome, clean line drawings for physics and mathematics unless the content clearly requires otherwise.
 For chemistry, preserve formulas, labels, and experimental details exactly.
 Create multiple visual items when the problem or solution naturally needs multiple separate diagrams, graphs, chemical structures, or explanatory figures.
+For visuals with placement "problem", include only information explicitly given in the problem statement.
+Problem-side visuals must not depict the conclusion to be proved, the final answer, a derived graph or shape, hidden symmetry, auxiliary construction introduced only in the solution, proof-guiding relation, intermediate result, solved state, product, mechanism, trajectory, force decomposition, or any relation students are expected to discover.
+If a useful visual would need to show derived or answer-revealing information, set placement to "solution" or "explanation" instead.
+When uncertain whether a visual would lower the intended difficulty, prefer placement "solution" over "problem".
+For problem-side visual_contract values, explicitly list any conclusion or derived information that must not be drawn in non_goals.
 Do not create copyrighted textbook-style references or mention existing books.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:

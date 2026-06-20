@@ -8,6 +8,7 @@ from mathgen.visual_agents import (
     TikZValidatorAgent,
     VisualGenerationService,
     VisualInstructionAgent,
+    visual_instruction_system_prompt,
 )
 
 
@@ -49,6 +50,14 @@ class FakeRenderer:
 
 
 class VisualGenerationServiceTests(unittest.TestCase):
+    def test_visual_instruction_prompt_keeps_problem_visuals_given_only(self):
+        prompt = visual_instruction_system_prompt()
+
+        self.assertIn('For visuals with placement "problem"', prompt)
+        self.assertIn("explicitly given in the problem statement", prompt)
+        self.assertIn("conclusion to be proved", prompt)
+        self.assertIn("prefer placement \"solution\"", prompt)
+
     def request(self):
         return VisualGenerateRequest.from_dict(
             {

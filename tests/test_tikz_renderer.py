@@ -1,7 +1,14 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from mathgen.models import ContractError
-from mathgen.tikz_renderer import CompileAction, TikZCompileAgent, TikZRenderer
+from mathgen.tikz_renderer import (
+    CompileAction,
+    TikZCompileAgent,
+    TikZRenderer,
+    _write_compile_documents,
+)
 
 
 class FakeCompileClient:
@@ -41,6 +48,18 @@ class TikZRendererTests(unittest.TestCase):
             renderer.render_png(
                 "\\begin{tikzpicture}\\draw (0,0)--(1,0);\\end{tikzpicture}"
             )
+
+    def test_compile_documents_load_intersections_library(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workdir = Path(tmpdir)
+            _write_compile_documents(
+                workdir,
+                "\\begin{tikzpicture}\\end{tikzpicture}",
+            )
+
+            document = (workdir / "main-lualatex.tex").read_text(encoding="utf-8")
+
+        self.assertIn("intersections", document)
 
 
 if __name__ == "__main__":
