@@ -242,6 +242,9 @@ VISUAL_TIKZ_MODEL
 VISUAL_TIKZ_COMPILE_MODEL
 VISUAL_TIKZ_VALIDATOR_MODEL
 VISUAL_TIKZ_REPAIR_MODEL
+VISUAL_CETZ_MODEL
+VISUAL_CETZ_VALIDATOR_MODEL
+VISUAL_CETZ_REPAIR_MODEL
 COMPOSITE_LAYOUT_MODEL
 ```
 
@@ -256,6 +259,9 @@ VISUAL_TIKZ_REPAIR_ATTEMPTS=2
 VISUAL_RENDER_ENABLED=true
 VISUAL_COMPILE_TIMEOUT_SECONDS=30
 VISUAL_COMPILE_MAX_ACTIONS=5
+VISUAL_CETZ_REPAIR_ATTEMPTS=2
+VISUAL_CETZ_COMPILE_TIMEOUT_SECONDS=30
+VISUAL_CETZ_RENDER_PPI=180
 PROBLEM_RENDER_TIMEOUT_SECONDS=180
 PROBLEM_RENDER_DPI=180
 COMPOSITE_RENDER_ENABLED=false
@@ -269,6 +275,13 @@ compilation all receive the same contract. Validators must check only blocking
 contract violations and must not introduce new optional criteria or alternative
 diagram conventions during repair validation.
 
+For comparison testing, the same visual instruction and `visual_contract` are
+also sent through a separate CeTZ/Typst generation, validation, repair, and
+compile workflow. The primary `visual_assets` response remains TikZ-only for
+compatibility; CeTZ results are returned in `comparison_visual_assets` with
+`comparison_backend: "cetz"`. CeTZ comparison failures do not fail the primary
+TikZ visual generation result.
+
 Each TikZ source is checked by a source-level TikZ validator. If validation
 requires repair, the TikZ repair agent revises the same source and validation
 runs again until it passes or reaches `VISUAL_TIKZ_REPAIR_ATTEMPTS`. After that,
@@ -276,16 +289,17 @@ runs again until it passes or reaches `VISUAL_TIKZ_REPAIR_ATTEMPTS`. After that,
 and generated files, and keeps iterating until a PDF is produced or it concludes
 that the TikZ source itself needs repair. The compiled PDF is converted to PNG
 with `pdftoppm`. The text-only `/generate` endpoint does not read these visual
-settings.
+settings. Each CeTZ source is rendered by Typst as a PNG when visual rendering
+is enabled.
 
 `POST /generate` can optionally render the final problem and solution as PNG
 pages by including `render_output: true`, `render_png: true`, or
 `include_rendered_output: true` in the request. This uses LuaLaTeX and
 `pdftoppm` in the same Docker runtime and returns `rendered_output.assets`.
 
-The Docker image installs `texlive-full` and `poppler-utils`; `texlive-full`
-covers the LaTeX package surface, while `poppler-utils` provides `pdftoppm` for
-PNG conversion.
+The Docker image installs `texlive-full`, `poppler-utils`, Typst, and Noto CJK
+fonts. `texlive-full` covers the LaTeX package surface, `poppler-utils` provides
+`pdftoppm` for PNG conversion, and Typst renders the CeTZ comparison output.
 
 If OpenCode Go returns Cloudflare 1010 `browser_signature_banned`, the request
 was blocked before reaching the LLM API. The client sends
@@ -425,6 +439,20 @@ with the original TikZ source retained:
       "tikz_source": "\\begin{tikzpicture}...\\end{tikzpicture}",
       "compile_status": "compiled",
       "compile_engine": "lualatex"
+    }
+  ],
+  "comparison_backend": "cetz",
+  "comparison_visual_validation_status": "compiled",
+  "comparison_visual_assets": [
+    {
+      "mime_type": "image/png",
+      "id": "visual_1",
+      "placement": "problem",
+      "purpose": "diagram",
+      "png_base64": "...",
+      "cetz_source": "import cetz.draw: *\n...",
+      "compile_status": "compiled",
+      "compile_engine": "typst"
     }
   ]
 }

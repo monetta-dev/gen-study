@@ -36,7 +36,11 @@ from .models import (
     VisualGenerateRequest,
 )
 from .problem_renderer import ProblemRenderer, ProblemRenderError
+from .cetz_renderer import CetzRenderer
 from .visual_agents import (
+    CetzGenerationAgent,
+    CetzRepairAgent,
+    CetzValidatorAgent,
     TikZGenerationAgent,
     TikZRepairAgent,
     TikZValidatorAgent,
@@ -82,7 +86,11 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
     tikz_client = _opencode_client_for_role("VISUAL_TIKZ")
     tikz_validator_client = _opencode_client_for_role("VISUAL_TIKZ_VALIDATOR")
     tikz_repair_client = _opencode_client_for_role("VISUAL_TIKZ_REPAIR")
+    cetz_client = _opencode_client_for_role("VISUAL_CETZ")
+    cetz_validator_client = _opencode_client_for_role("VISUAL_CETZ_VALIDATOR")
+    cetz_repair_client = _opencode_client_for_role("VISUAL_CETZ_REPAIR")
     renderer = None
+    cetz_renderer = None
     if _env_flag("VISUAL_RENDER_ENABLED", True):
         tikz_compile_client = _opencode_client_for_role("VISUAL_TIKZ_COMPILE")
         renderer = TikZRenderer(
@@ -91,6 +99,10 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
             max_actions=_env_int("VISUAL_COMPILE_MAX_ACTIONS", 5),
             tracer=tracer,
         )
+        cetz_renderer = CetzRenderer(
+            timeout_seconds=_env_float("VISUAL_CETZ_COMPILE_TIMEOUT_SECONDS", 30.0),
+            ppi=_env_int("VISUAL_CETZ_RENDER_PPI", 180),
+        )
     return VisualGenerationService(
         instruction_agent=VisualInstructionAgent(instruction_client, tracer=tracer),
         tikz_agent=TikZGenerationAgent(tikz_client, tracer=tracer),
@@ -98,6 +110,11 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
         tikz_repair_agent=TikZRepairAgent(tikz_repair_client, tracer=tracer),
         max_repair_attempts=_env_int("VISUAL_TIKZ_REPAIR_ATTEMPTS", 2),
         renderer=renderer,
+        cetz_agent=CetzGenerationAgent(cetz_client, tracer=tracer),
+        cetz_validator=CetzValidatorAgent(cetz_validator_client, tracer=tracer),
+        cetz_repair_agent=CetzRepairAgent(cetz_repair_client, tracer=tracer),
+        cetz_renderer=cetz_renderer,
+        max_cetz_repair_attempts=_env_int("VISUAL_CETZ_REPAIR_ATTEMPTS", 2),
         tracer=tracer,
     )
 

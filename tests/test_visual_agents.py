@@ -3,10 +3,14 @@ import unittest
 
 from mathgen.models import ModelOutputError, VisualGenerateRequest
 from mathgen.visual_agents import (
+    CetzGenerationAgent,
+    CetzRepairAgent,
+    CetzValidatorAgent,
     TikZGenerationAgent,
     TikZRepairAgent,
     TikZValidatorAgent,
     VisualGenerationService,
+    cetz_generation_system_prompt,
     VisualInstructionAgent,
     visual_instruction_system_prompt,
 )
@@ -77,6 +81,10 @@ class VisualGenerationServiceTests(unittest.TestCase):
         repair_client=None,
         max_repair_attempts=2,
         renderer=None,
+        cetz_client=None,
+        cetz_validator_client=None,
+        cetz_repair_client=None,
+        cetz_renderer=None,
     ):
         return VisualGenerationService(
             VisualInstructionAgent(instruction_client),
@@ -85,6 +93,20 @@ class VisualGenerationServiceTests(unittest.TestCase):
             TikZRepairAgent(repair_client or FakeChatClient([])),
             max_repair_attempts=max_repair_attempts,
             renderer=renderer,
+            cetz_agent=(
+                CetzGenerationAgent(cetz_client) if cetz_client is not None else None
+            ),
+            cetz_validator=(
+                CetzValidatorAgent(cetz_validator_client)
+                if cetz_validator_client is not None
+                else None
+            ),
+            cetz_repair_agent=(
+                CetzRepairAgent(cetz_repair_client)
+                if cetz_repair_client is not None
+                else None
+            ),
+            cetz_renderer=cetz_renderer,
         )
 
     def test_returns_no_asset_when_visual_not_needed(self):
@@ -162,6 +184,73 @@ class VisualGenerationServiceTests(unittest.TestCase):
             ["cart is present"],
         )
         self.assertEqual(validator_payload["validation_mode"], "initial_validation")
+
+    def test_cetz_prompt_is_separate_from_tikz(self):
+        prompt = cetz_generation_system_prompt()
+
+        self.assertIn("CeTZGenerationAgent", prompt)
+        self.assertIn("#cetz.canvas", prompt)
+        self.assertIn("Do not include #import", prompt)
+        self.assertIn('"cetz_source"', prompt)
+
+    def test_generates_cetz_comparison_asset_without_replacing_tikz(self):
+        instruction_client = FakeChatClient(
+            [
+                json.dumps(
+                    {
+                        "needed": True,
+                        "visuals": [
+                            {
+                                "id": "figure_1",
+                                "placement": "problem",
+                                "purpose": "diagram",
+                                "prompt": "Draw a cart setup.",
+                                "must_include": ["cart"],
+                                "must_not_include": [],
+                            }
+                        ],
+                    }
+                )
+            ]
+        )
+        tikz_client = FakeChatClient(
+            [
+                json.dumps(
+                    {
+                        "tikz_source": "\\begin{tikzpicture}\\draw (0,0)--(1,0);\\end{tikzpicture}"
+                    }
+                )
+            ]
+        )
+        validator_client = FakeChatClient(
+            [json.dumps({"status": "pass", "issues": []})]
+        )
+        cetz_client = FakeChatClient(
+            [json.dumps({"cetz_source": "import cetz.draw: *\nline((0,0), (1,0))"})]
+        )
+        cetz_validator_client = FakeChatClient(
+            [json.dumps({"status": "pass", "issues": []})]
+        )
+        service = self.service(
+            instruction_client,
+            tikz_client,
+            validator_client,
+            cetz_client=cetz_client,
+            cetz_validator_client=cetz_validator_client,
+            cetz_repair_client=FakeChatClient([]),
+        )
+
+        result = service.generate_visual(self.request())
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["visual_backend"], "tikz")
+        self.assertIn("tikz_source", result["visual_assets"][0])
+        self.assertEqual(result["comparison_backend"], "cetz")
+        self.assertEqual(result["comparison_visual_validation_status"], "pass")
+        self.assertIn("cetz_source", result["comparison_visual_assets"][0])
+        self.assertEqual(result["comparison_attempts"][0]["action"], "generate_cetz")
+        cetz_payload = json.loads(cetz_client.messages[0][1]["content"])
+        self.assertEqual(cetz_payload["visual_prompt"], "Draw a cart setup.")
 
     def test_generates_rendered_png_asset_when_renderer_is_available(self):
         instruction_client = FakeChatClient(
