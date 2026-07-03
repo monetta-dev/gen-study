@@ -9,6 +9,7 @@ from mathgen.problem_renderer import (
     RenderedPage,
     RenderedProblemOutput,
     _document,
+    _normalize_body_for_latex,
     _run_lualatex,
 )
 
@@ -37,6 +38,21 @@ class ProblemRendererTests(unittest.TestCase):
         )
 
         self.assertEqual(output.to_dict()["assets"][0]["kind"], "problem")
+
+    def test_normalizes_literal_escaped_newlines_for_latex(self):
+        body = "条件を満たす。\\n$\\vec{a}=\\vec{OA}$\\r\\n次を求めよ。\\t以上。"
+
+        normalized = _normalize_body_for_latex(body)
+
+        self.assertEqual(
+            normalized,
+            "条件を満たす。\n$\\vec{a}=\\vec{OA}$\n次を求めよ。 以上。",
+        )
+
+    def test_normalization_preserves_latex_commands(self):
+        body = "$\\frac{1}{2}\\theta + \\sum x_k + \\vec{a}$"
+
+        self.assertEqual(_normalize_body_for_latex(body), body)
 
     def test_lualatex_timeout_is_render_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
