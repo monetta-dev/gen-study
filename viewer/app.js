@@ -428,8 +428,11 @@ function renderVisualResponse(data) {
     return;
   }
 
-  const assets = Array.isArray(data.visual_assets) ? data.visual_assets : [];
-  if (assets.length === 0) {
+  const tikzAssets = Array.isArray(data.visual_assets) ? data.visual_assets : [];
+  const comparisonAssets = Array.isArray(data.comparison_visual_assets)
+    ? data.comparison_visual_assets
+    : [];
+  if (tikzAssets.length === 0 && comparisonAssets.length === 0) {
     visualOutput.textContent = "No visual asset was returned.";
     visualOutput.classList.add("empty");
     return;
@@ -439,6 +442,42 @@ function renderVisualResponse(data) {
   status.className = `visual-status ${data.visual_validation_status || ""}`.trim();
   status.textContent = `Validation: ${data.visual_validation_status || "unknown"}`;
   visualOutput.appendChild(status);
+
+  visualOutput.appendChild(
+    renderVisualAssetSection({
+      title: "TikZ",
+      assets: tikzAssets,
+      sourceKey: "tikz_source",
+      sourceLabel: "TikZ",
+      missingSourceText: "No TikZ source was returned.",
+    }),
+  );
+
+  if (comparisonAssets.length > 0) {
+    const comparisonStatus = document.createElement("div");
+    comparisonStatus.className = `visual-status ${data.comparison_visual_validation_status || ""}`.trim();
+    comparisonStatus.textContent = `CeTZ validation: ${data.comparison_visual_validation_status || "unknown"}`;
+    visualOutput.appendChild(comparisonStatus);
+    visualOutput.appendChild(
+      renderVisualAssetSection({
+        title: "CeTZ comparison",
+        assets: comparisonAssets,
+        sourceKey: "cetz_source",
+        sourceLabel: "CeTZ",
+        missingSourceText: "No CeTZ source was returned.",
+      }),
+    );
+  }
+}
+
+function renderVisualAssetSection({ title, assets, sourceKey, sourceLabel, missingSourceText }) {
+  const section = document.createElement("section");
+  section.className = "visual-asset-section";
+
+  const heading = document.createElement("h4");
+  heading.className = "visual-asset-heading";
+  heading.textContent = title;
+  section.appendChild(heading);
 
   const grid = document.createElement("div");
   grid.className = "visual-grid";
@@ -464,10 +503,10 @@ function renderVisualResponse(data) {
     const sourceDetails = document.createElement("details");
     sourceDetails.className = "source-details";
     const sourceSummary = document.createElement("summary");
-    sourceSummary.textContent = "TikZ";
+    sourceSummary.textContent = sourceLabel;
     const source = document.createElement("pre");
     source.className = "tikz-source";
-    source.textContent = asset.tikz_source || "No TikZ source was returned.";
+    source.textContent = asset[sourceKey] || missingSourceText;
     sourceDetails.appendChild(sourceSummary);
     sourceDetails.appendChild(source);
     figure.appendChild(sourceDetails);
@@ -498,7 +537,8 @@ function renderVisualResponse(data) {
 
     grid.appendChild(figure);
   });
-  visualOutput.appendChild(grid);
+  section.appendChild(grid);
+  return section;
 }
 
 function renderProblemImages(data) {
