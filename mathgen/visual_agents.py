@@ -79,7 +79,6 @@ Use monochrome line-art style suitable for an exam booklet.
 Use clear mathematical labels and avoid unnecessary decoration.
 Prefer simple CeTZ primitives, coordinates, content labels, lines, arrows, dashed auxiliary lines, and plots when appropriate.
 Use Typst math syntax for labels when mathematical notation is needed.
-For arbitrary filled triangles or polygons, use path(..., close: true, fill: ..., stroke: ...). Do not use polygon(...) for a list of vertices; CeTZ polygon is for regular polygons and expects a side count.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {"cetz_source":"import cetz.draw: *\nline((0,0), (1,0))"}"""
@@ -132,7 +131,6 @@ Repair only the listed blocking issues. Do not reinterpret the diagram or change
 Return only the repaired CeTZ code inside a JSON object.
 The CeTZ source must be the body of a #cetz.canvas({...}) block, not a full Typst document.
 Do not include #import, #cetz.canvas, markdown fences, explanatory text, LaTeX, or TikZ.
-For arbitrary filled triangles or polygons, use path(..., close: true, fill: ..., stroke: ...). Do not use polygon(...) for a list of vertices; CeTZ polygon is for regular polygons and expects a side count.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {"cetz_source":"import cetz.draw: *\nline((0,0), (1,0))"}"""

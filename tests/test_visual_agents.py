@@ -192,7 +192,6 @@ class VisualGenerationServiceTests(unittest.TestCase):
         self.assertIn("Convert the provided final TikZ source", prompt)
         self.assertIn("#cetz.canvas", prompt)
         self.assertIn("Do not include #import", prompt)
-        self.assertIn("path(..., close: true", prompt)
         self.assertIn('"cetz_source"', prompt)
 
     def test_generates_cetz_comparison_asset_without_replacing_tikz(self):
