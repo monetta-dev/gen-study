@@ -93,10 +93,28 @@ class ProblemRenderer:
 
 
 def _normalize_body_for_latex(body: str) -> str:
-    normalized = re.sub(r"\\r\\n(?![A-Za-z])", "\n", body)
+    normalized = _repair_decoded_latex_control_escapes(body)
+    normalized = re.sub(r"\\r\\n(?![A-Za-z])", "\n", normalized)
     normalized = re.sub(r"\\r(?![A-Za-z])", "\n", normalized)
     normalized = re.sub(r"\\n(?![A-Za-z])", "\n", normalized)
     return re.sub(r"\\t(?![A-Za-z])", " ", normalized)
+
+
+def _repair_decoded_latex_control_escapes(body: str) -> str:
+    repairs = {
+        "\b": "\\b",
+        "\f": "\\f",
+        "\r": "\\r",
+        "\t": "\\t",
+    }
+    repaired = body
+    for control, replacement in repairs.items():
+        repaired = re.sub(
+            f"{re.escape(control)}(?=[A-Za-z])",
+            lambda _match, value=replacement: value,
+            repaired,
+        )
+    return repaired
 
 
 def _document(title: str, body: str) -> str:

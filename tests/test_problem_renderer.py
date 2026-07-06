@@ -54,6 +54,14 @@ class ProblemRendererTests(unittest.TestCase):
 
         self.assertEqual(_normalize_body_for_latex(body), body)
 
+    def test_normalization_repairs_json_decoded_latex_control_escapes(self):
+        body = "$s = \frac{1-t}{2}$ かつ $\theta = \theta_0$"
+
+        self.assertEqual(
+            _normalize_body_for_latex(body),
+            "$s = \\frac{1-t}{2}$ かつ $\\theta = \\theta_0$",
+        )
+
     def test_lualatex_timeout_is_render_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch("shutil.which", return_value="/usr/bin/lualatex"):
