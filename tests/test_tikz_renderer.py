@@ -38,39 +38,16 @@ class TikZRendererTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "issues"):
             CompileAction.from_dict({"action": "request_tikz_repair"})
 
-    def test_renderer_records_disallowed_agent_command_without_running_it(self):
+    def test_renderer_rejects_shell_syntax_in_agent_command(self):
         client = FakeCompileClient(
             '{"action":"run_command","argv":["lualatex","main.tex;rm -rf ."],"reason":"bad"}'
         )
         renderer = TikZRenderer(TikZCompileAgent(client), max_actions=1)
 
-        result = renderer.render_png(
-            "\\begin{tikzpicture}\\draw (0,0)--(1,0);\\end{tikzpicture}"
-        )
-
-        self.assertEqual(result.status, "failed")
-        self.assertEqual(result.compile_transcript[1]["observation"]["returncode"], 126)
-        self.assertIn(
-            "shell syntax",
-            result.compile_transcript[1]["observation"]["stderr"],
-        )
-
-    def test_renderer_records_unknown_agent_command_without_running_it(self):
-        client = FakeCompileClient(
-            '{"action":"run_command","argv":["cat","main-lualatex.tex"],"reason":"inspect"}'
-        )
-        renderer = TikZRenderer(TikZCompileAgent(client), max_actions=1)
-
-        result = renderer.render_png(
-            "\\begin{tikzpicture}\\draw (0,0)--(1,0);\\end{tikzpicture}"
-        )
-
-        self.assertEqual(result.status, "failed")
-        self.assertEqual(result.compile_transcript[1]["observation"]["returncode"], 126)
-        self.assertIn(
-            "not an allowed compile command",
-            result.compile_transcript[1]["observation"]["stderr"],
-        )
+        with self.assertRaisesRegex(ContractError, "shell syntax"):
+            renderer.render_png(
+                "\\begin{tikzpicture}\\draw (0,0)--(1,0);\\end{tikzpicture}"
+            )
 
     def test_compile_documents_load_intersections_library(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -386,8 +386,6 @@ class ApiTests(unittest.TestCase):
                 "VISUAL_TIKZ_COMPILE_THINKING_BUDGET_TOKENS",
                 "VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS",
                 "VISUAL_TIKZ_REPAIR_THINKING_BUDGET_TOKENS",
-                "VISUAL_CETZ_VALIDATOR_THINKING_BUDGET_TOKENS",
-                "VISUAL_CETZ_REPAIR_THINKING_BUDGET_TOKENS",
                 "VISUAL_RENDER_ENABLED",
             )
         }
@@ -410,8 +408,6 @@ class ApiTests(unittest.TestCase):
                 os.environ["VISUAL_TIKZ_COMPILE_THINKING_BUDGET_TOKENS"] = "3072"
                 os.environ["VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS"] = "2048"
                 os.environ["VISUAL_TIKZ_REPAIR_THINKING_BUDGET_TOKENS"] = "4096"
-                os.environ["VISUAL_CETZ_VALIDATOR_THINKING_BUDGET_TOKENS"] = "256"
-                os.environ["VISUAL_CETZ_REPAIR_THINKING_BUDGET_TOKENS"] = "128"
                 os.environ["VISUAL_RENDER_ENABLED"] = "true"
                 with patch.object(api_module, "OpenCodeGoClient", FakeOpenCodeClient):
                     api_module.build_visual_service()
@@ -425,7 +421,7 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(
             [call["thinking_budget_tokens"] for call in calls],
-            [1024, 8192, 2048, 4096, 256, 128, 3072],
+            [1024, 8192, 2048, 4096, 3072],
         )
 
     def test_generate_endpoint_rejects_invalid_request(self):

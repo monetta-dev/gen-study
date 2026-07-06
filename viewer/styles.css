@@ -289,17 +289,6 @@ button:disabled {
   color: #8a5a00;
 }
 
-.visual-asset-section + .visual-status,
-.visual-asset-section + .visual-asset-section {
-  margin-top: 18px;
-}
-
-.visual-asset-heading {
-  margin: 0 0 10px;
-  color: var(--text);
-  font-size: 15px;
-}
-
 .visual-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

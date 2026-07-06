@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import re
 import shutil
 import subprocess
 import tempfile
@@ -71,10 +70,7 @@ class ProblemRenderer:
         with tempfile.TemporaryDirectory(prefix=f"gen-study-{kind}-") as tmpdir:
             workdir = Path(tmpdir)
             tex_path = workdir / "main.tex"
-            tex_path.write_text(
-                _document(title, _normalize_body_for_latex(body)),
-                encoding="utf-8",
-            )
+            tex_path.write_text(_document(title, body), encoding="utf-8")
             _run_lualatex(workdir, self.timeout_seconds)
             pdf_path = workdir / "main.pdf"
             if not pdf_path.exists():
@@ -90,31 +86,6 @@ class ProblemRenderer:
                 )
                 for index, path in enumerate(png_paths, start=1)
             ]
-
-
-def _normalize_body_for_latex(body: str) -> str:
-    normalized = _repair_decoded_latex_control_escapes(body)
-    normalized = re.sub(r"\\r\\n(?![A-Za-z])", "\n", normalized)
-    normalized = re.sub(r"\\r(?![A-Za-z])", "\n", normalized)
-    normalized = re.sub(r"\\n(?![A-Za-z])", "\n", normalized)
-    return re.sub(r"\\t(?![A-Za-z])", " ", normalized)
-
-
-def _repair_decoded_latex_control_escapes(body: str) -> str:
-    repairs = {
-        "\b": "\\b",
-        "\f": "\\f",
-        "\r": "\\r",
-        "\t": "\\t",
-    }
-    repaired = body
-    for control, replacement in repairs.items():
-        repaired = re.sub(
-            f"{re.escape(control)}(?=[A-Za-z])",
-            lambda _match, value=replacement: value,
-            repaired,
-        )
-    return repaired
 
 
 def _document(title: str, body: str) -> str:

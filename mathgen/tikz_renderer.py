@@ -251,17 +251,7 @@ class TikZRenderer:
     def _run_allowed_command(
         self, argv: tuple[str, ...], workdir: Path
     ) -> CommandObservation:
-        try:
-            _validate_argv(argv)
-        except ContractError as exc:
-            return CommandObservation(
-                argv=argv,
-                returncode=126,
-                stdout="",
-                stderr=str(exc),
-                log_excerpt=_collect_log_excerpt(workdir),
-                files=tuple(_list_files(workdir)),
-            )
+        _validate_argv(argv)
         try:
             completed = subprocess.run(
                 list(argv),
