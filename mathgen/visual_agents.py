@@ -6,6 +6,7 @@ import json
 from typing import Callable, Protocol
 
 from .agents import InteractionTracer, chat_json
+from .cetz_converter import CetzConversionResult, TylaxCetzConverter
 from .models import (
     ContractError,
     TikZValidationResult,
@@ -28,6 +29,11 @@ class TikZRendererClient(Protocol):
 class CetzRendererClient(Protocol):
     def render_png(self, cetz_source: str):
         """Compile CeTZ/Typst and return a rendered PNG result."""
+
+
+class CetzConverterClient(Protocol):
+    def convert_tikz_to_cetz(self, tikz_source: str) -> CetzConversionResult:
+        """Convert a complete TikZ picture to a CeTZ canvas body."""
 
 
 def visual_instruction_system_prompt() -> str:
@@ -65,23 +71,6 @@ Prefer simple TikZ primitives, coordinates, nodes, arrows, dashed auxiliary line
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {"tikz_source":"\\begin{tikzpicture}...\\end{tikzpicture}"}"""
-
-
-def cetz_conversion_system_prompt() -> str:
-    return """You are CeTZConversionAgent, a TikZ-to-CeTZ diagram translator.
-Convert the provided final TikZ source into equivalent CeTZ drawing code.
-Preserve the diagram's geometry, labels, placement, visual_contract, and exam-style intent as closely as possible.
-Use the visual instruction, frozen visual_contract, problem, and solution only to resolve ambiguity in the TikZ source.
-Return only CeTZ drawing code inside a JSON object.
-The CeTZ source must be the body of a #cetz.canvas({...}) block, not a full Typst document.
-Do not include #import, #cetz.canvas, markdown fences, explanatory text, LaTeX, or TikZ.
-Use monochrome line-art style suitable for an exam booklet.
-Use clear mathematical labels and avoid unnecessary decoration.
-Prefer simple CeTZ primitives, coordinates, content labels, lines, arrows, dashed auxiliary lines, and plots when appropriate.
-Use Typst math syntax for labels when mathematical notation is needed.
-Use internal reasoning if available, but output only strict JSON.
-Return exactly this JSON shape:
-{"cetz_source":"import cetz.draw: *\nline((0,0), (1,0))"}"""
 
 
 def tikz_validation_system_prompt() -> str:
@@ -290,9 +279,11 @@ class TikZRepairAgent:
 
 class CetzConversionAgent:
     def __init__(
-        self, client: VisualChatClient, tracer: InteractionTracer | None = None
+        self,
+        converter: CetzConverterClient | None = None,
+        tracer: InteractionTracer | None = None,
     ) -> None:
-        self.client = client
+        self.converter = converter or TylaxCetzConverter()
         self.tracer = tracer or InteractionTracer()
 
     def convert_tikz_to_cetz(
@@ -300,38 +291,34 @@ class CetzConversionAgent:
         request: VisualGenerateRequest,
         instruction: VisualInstruction,
         tikz_source: str,
-    ) -> str:
-        messages: list[dict[str, object]] = [
-            {"role": "system", "content": cetz_conversion_system_prompt()},
+    ) -> CetzConversionResult:
+        request_record = [
             {
-                "role": "user",
+                "role": "tool",
                 "content": json.dumps(
                     {
-                        "subject": request.subject,
-                        "level": request.level,
-                        "topic": request.topic,
-                        "placement": instruction.placement,
-                        "purpose": instruction.purpose,
-                        "visual_prompt": instruction.prompt,
-                        "visual_contract": instruction.visual_contract,
-                        "must_include": list(instruction.must_include),
-                        "must_not_include": list(instruction.must_not_include),
-                        "problem": request.problem,
-                        "solution": request.solution,
+                        "engine": "tylax",
+                        "visual_id": instruction.visual_id,
                         "tikz_source": tikz_source,
                     },
                     ensure_ascii=False,
                 ),
-            },
+            }
         ]
-        return chat_json(
+        self.tracer.log_request("CeTZConversionAgent", request_record)
+        result = self.converter.convert_tikz_to_cetz(tikz_source)
+        self.tracer.log_response(
             "CeTZConversionAgent",
-            self.client,
-            self.tracer,
-            messages,
-            _cetz_source_from_dict,
-            '{"cetz_source":"import cetz.draw: *\\nline((0,0), (1,0))"}',
+            json.dumps(
+                {
+                    "engine": "tylax",
+                    "cetz_source": result.cetz_source,
+                    "transcript": list(result.transcript),
+                },
+                ensure_ascii=False,
+            ),
         )
+        return result
 
 
 class CetzValidatorAgent:
@@ -668,14 +655,17 @@ class VisualGenerationService:
         assert self.cetz_validator is not None
         assert self.cetz_repair_agent is not None
         self._progress(f"Converting TikZ to CeTZ for {instruction.visual_id}.")
-        cetz_source = self.cetz_agent.convert_tikz_to_cetz(
+        conversion_result = self.cetz_agent.convert_tikz_to_cetz(
             request, instruction, tikz_source
         )
+        cetz_source = conversion_result.cetz_source
         active_issues: tuple[str, ...] = ()
         attempts: list[dict[str, object]] = [
             {
                 "visual_id": instruction.visual_id,
                 "action": "convert_tikz_to_cetz",
+                "engine": "tylax",
+                "transcript": list(conversion_result.transcript),
                 "prompt": instruction.prompt,
                 "tikz_source": tikz_source,
                 "cetz_source": cetz_source,

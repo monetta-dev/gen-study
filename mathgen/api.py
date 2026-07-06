@@ -22,6 +22,7 @@ from .agents import (
     MathGenerationService,
     RepairAgent,
 )
+from .cetz_converter import TylaxCetzConverter
 from .composite_renderer import (
     CompositeLayoutAgent,
     CompositeRenderError,
@@ -86,7 +87,6 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
     tikz_client = _opencode_client_for_role("VISUAL_TIKZ")
     tikz_validator_client = _opencode_client_for_role("VISUAL_TIKZ_VALIDATOR")
     tikz_repair_client = _opencode_client_for_role("VISUAL_TIKZ_REPAIR")
-    cetz_client = _opencode_client_for_role("VISUAL_CETZ")
     cetz_validator_client = _opencode_client_for_role("VISUAL_CETZ_VALIDATOR")
     cetz_repair_client = _opencode_client_for_role("VISUAL_CETZ_REPAIR")
     renderer = None
@@ -110,7 +110,12 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
         tikz_repair_agent=TikZRepairAgent(tikz_repair_client, tracer=tracer),
         max_repair_attempts=_env_int("VISUAL_TIKZ_REPAIR_ATTEMPTS", 2),
         renderer=renderer,
-        cetz_agent=CetzConversionAgent(cetz_client, tracer=tracer),
+        cetz_agent=CetzConversionAgent(
+            TylaxCetzConverter(
+                timeout_seconds=_env_float("VISUAL_CETZ_CONVERT_TIMEOUT_SECONDS", 30.0)
+            ),
+            tracer=tracer,
+        ),
         cetz_validator=CetzValidatorAgent(cetz_validator_client, tracer=tracer),
         cetz_repair_agent=CetzRepairAgent(cetz_repair_client, tracer=tracer),
         cetz_renderer=cetz_renderer,

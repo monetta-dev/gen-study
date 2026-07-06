@@ -242,7 +242,6 @@ VISUAL_TIKZ_MODEL
 VISUAL_TIKZ_COMPILE_MODEL
 VISUAL_TIKZ_VALIDATOR_MODEL
 VISUAL_TIKZ_REPAIR_MODEL
-VISUAL_CETZ_MODEL
 VISUAL_CETZ_VALIDATOR_MODEL
 VISUAL_CETZ_REPAIR_MODEL
 COMPOSITE_LAYOUT_MODEL
@@ -259,6 +258,7 @@ VISUAL_TIKZ_REPAIR_ATTEMPTS=2
 VISUAL_RENDER_ENABLED=true
 VISUAL_COMPILE_TIMEOUT_SECONDS=30
 VISUAL_COMPILE_MAX_ACTIONS=5
+VISUAL_CETZ_CONVERT_TIMEOUT_SECONDS=30
 VISUAL_CETZ_REPAIR_ATTEMPTS=2
 VISUAL_CETZ_COMPILE_TIMEOUT_SECONDS=30
 VISUAL_CETZ_RENDER_PPI=180
@@ -275,12 +275,13 @@ compilation all receive the same contract. Validators must check only blocking
 contract violations and must not introduce new optional criteria or alternative
 diagram conventions during repair validation.
 
-For comparison testing, the final TikZ source is also sent through a
-TikZ-to-CeTZ conversion, validation, repair, and Typst compile workflow using
-the same visual instruction and `visual_contract`. The primary `visual_assets`
-response remains TikZ-only for compatibility; CeTZ results are returned in
-`comparison_visual_assets` with `comparison_backend: "cetz"`. CeTZ comparison
-failures do not fail the primary TikZ visual generation result.
+For comparison testing, the final TikZ source is also sent through a static
+Tylax TikZ-to-CeTZ conversion, followed by the same CeTZ validation, repair, and
+Typst compile workflow using the same visual instruction and `visual_contract`.
+The primary `visual_assets` response remains TikZ-only for compatibility; CeTZ
+results are returned in `comparison_visual_assets` with
+`comparison_backend: "cetz"`. CeTZ comparison failures do not fail the primary
+TikZ visual generation result.
 
 Each TikZ source is checked by a source-level TikZ validator. If validation
 requires repair, the TikZ repair agent revises the same source and validation
@@ -297,9 +298,10 @@ pages by including `render_output: true`, `render_png: true`, or
 `include_rendered_output: true` in the request. This uses LuaLaTeX and
 `pdftoppm` in the same Docker runtime and returns `rendered_output.assets`.
 
-The Docker image installs `texlive-full`, `poppler-utils`, Typst, and Noto CJK
-fonts. `texlive-full` covers the LaTeX package surface, `poppler-utils` provides
-`pdftoppm` for PNG conversion, and Typst renders the CeTZ comparison output.
+The Docker image installs `texlive-full`, `poppler-utils`, Typst, Tylax, and
+Noto CJK fonts. `texlive-full` covers the LaTeX package surface, `poppler-utils`
+provides `pdftoppm` for PNG conversion, Tylax performs the static TikZ-to-CeTZ
+conversion, and Typst renders the CeTZ comparison output.
 
 If OpenCode Go returns Cloudflare 1010 `browser_signature_banned`, the request
 was blocked before reaching the LLM API. The client sends

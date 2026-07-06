@@ -1,3 +1,15 @@
+FROM rust:1-slim AS tylax-builder
+
+ARG TYLAX_VERSION=
+
+RUN set -eux; \
+    if [ -n "$TYLAX_VERSION" ]; then \
+        cargo install tylax --version "$TYLAX_VERSION"; \
+    else \
+        cargo install tylax; \
+    fi; \
+    /usr/local/cargo/bin/t2l --help >/dev/null
+
 FROM python:3.12-slim
 
 ARG TYPST_VERSION=0.15.0
@@ -31,6 +43,8 @@ RUN set -eux; \
     install -m 0755 /tmp/typst/typst /usr/local/bin/typst; \
     rm -rf /tmp/typst /tmp/typst.tar.xz; \
     typst --version
+
+COPY --from=tylax-builder /usr/local/cargo/bin/t2l /usr/local/bin/t2l
 
 WORKDIR /app
 

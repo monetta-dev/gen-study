@@ -10,7 +10,6 @@ from mathgen.visual_agents import (
     TikZRepairAgent,
     TikZValidatorAgent,
     VisualGenerationService,
-    cetz_conversion_system_prompt,
     VisualInstructionAgent,
     visual_instruction_system_prompt,
 )
@@ -53,6 +52,28 @@ class FakeRenderer:
         return self.result
 
 
+class FakeCetzConverter:
+    def __init__(self, cetz_source="import cetz.draw: *\nline((0,0), (1,0))"):
+        self.cetz_source = cetz_source
+        self.sources = []
+
+    def convert_tikz_to_cetz(self, tikz_source):
+        self.sources.append(tikz_source)
+        return type(
+            "FakeCetzConversionResult",
+            (),
+            {
+                "cetz_source": self.cetz_source,
+                "transcript": (
+                    {
+                        "action": "run_command",
+                        "argv": ["t2l", "tikz", "input.tex", "-o", "output.typ"],
+                    },
+                ),
+            },
+        )()
+
+
 class VisualGenerationServiceTests(unittest.TestCase):
     def test_visual_instruction_prompt_keeps_problem_visuals_given_only(self):
         prompt = visual_instruction_system_prompt()
@@ -81,7 +102,7 @@ class VisualGenerationServiceTests(unittest.TestCase):
         repair_client=None,
         max_repair_attempts=2,
         renderer=None,
-        cetz_client=None,
+        cetz_converter=None,
         cetz_validator_client=None,
         cetz_repair_client=None,
         cetz_renderer=None,
@@ -94,7 +115,9 @@ class VisualGenerationServiceTests(unittest.TestCase):
             max_repair_attempts=max_repair_attempts,
             renderer=renderer,
             cetz_agent=(
-                CetzConversionAgent(cetz_client) if cetz_client is not None else None
+                CetzConversionAgent(cetz_converter)
+                if cetz_converter is not None
+                else None
             ),
             cetz_validator=(
                 CetzValidatorAgent(cetz_validator_client)
@@ -185,15 +208,6 @@ class VisualGenerationServiceTests(unittest.TestCase):
         )
         self.assertEqual(validator_payload["validation_mode"], "initial_validation")
 
-    def test_cetz_prompt_converts_from_tikz(self):
-        prompt = cetz_conversion_system_prompt()
-
-        self.assertIn("CeTZConversionAgent", prompt)
-        self.assertIn("Convert the provided final TikZ source", prompt)
-        self.assertIn("#cetz.canvas", prompt)
-        self.assertIn("Do not include #import", prompt)
-        self.assertIn('"cetz_source"', prompt)
-
     def test_generates_cetz_comparison_asset_without_replacing_tikz(self):
         instruction_client = FakeChatClient(
             [
@@ -226,9 +240,7 @@ class VisualGenerationServiceTests(unittest.TestCase):
         validator_client = FakeChatClient(
             [json.dumps({"status": "pass", "issues": []})]
         )
-        cetz_client = FakeChatClient(
-            [json.dumps({"cetz_source": "import cetz.draw: *\nline((0,0), (1,0))"})]
-        )
+        cetz_converter = FakeCetzConverter()
         cetz_validator_client = FakeChatClient(
             [json.dumps({"status": "pass", "issues": []})]
         )
@@ -236,7 +248,7 @@ class VisualGenerationServiceTests(unittest.TestCase):
             instruction_client,
             tikz_client,
             validator_client,
-            cetz_client=cetz_client,
+            cetz_converter=cetz_converter,
             cetz_validator_client=cetz_validator_client,
             cetz_repair_client=FakeChatClient([]),
         )
@@ -253,9 +265,11 @@ class VisualGenerationServiceTests(unittest.TestCase):
             result["comparison_attempts"][0]["action"],
             "convert_tikz_to_cetz",
         )
-        cetz_payload = json.loads(cetz_client.messages[0][1]["content"])
-        self.assertEqual(cetz_payload["visual_prompt"], "Draw a cart setup.")
-        self.assertIn("\\begin{tikzpicture}", cetz_payload["tikz_source"])
+        self.assertEqual(result["comparison_attempts"][0]["engine"], "tylax")
+        self.assertEqual(
+            cetz_converter.sources,
+            ["\\begin{tikzpicture}\\draw (0,0)--(1,0);\\end{tikzpicture}"],
+        )
 
     def test_generates_rendered_png_asset_when_renderer_is_available(self):
         instruction_client = FakeChatClient(
