@@ -275,12 +275,12 @@ compilation all receive the same contract. Validators must check only blocking
 contract violations and must not introduce new optional criteria or alternative
 diagram conventions during repair validation.
 
-For comparison testing, the same visual instruction and `visual_contract` are
-also sent through a separate CeTZ/Typst generation, validation, repair, and
-compile workflow. The primary `visual_assets` response remains TikZ-only for
-compatibility; CeTZ results are returned in `comparison_visual_assets` with
-`comparison_backend: "cetz"`. CeTZ comparison failures do not fail the primary
-TikZ visual generation result.
+For comparison testing, the final TikZ source is also sent through a
+TikZ-to-CeTZ conversion, validation, repair, and Typst compile workflow using
+the same visual instruction and `visual_contract`. The primary `visual_assets`
+response remains TikZ-only for compatibility; CeTZ results are returned in
+`comparison_visual_assets` with `comparison_backend: "cetz"`. CeTZ comparison
+failures do not fail the primary TikZ visual generation result.
 
 Each TikZ source is checked by a source-level TikZ validator. If validation
 requires repair, the TikZ repair agent revises the same source and validation

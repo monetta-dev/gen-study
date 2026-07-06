@@ -3,14 +3,14 @@ import unittest
 
 from mathgen.models import ModelOutputError, VisualGenerateRequest
 from mathgen.visual_agents import (
-    CetzGenerationAgent,
+    CetzConversionAgent,
     CetzRepairAgent,
     CetzValidatorAgent,
     TikZGenerationAgent,
     TikZRepairAgent,
     TikZValidatorAgent,
     VisualGenerationService,
-    cetz_generation_system_prompt,
+    cetz_conversion_system_prompt,
     VisualInstructionAgent,
     visual_instruction_system_prompt,
 )
@@ -94,7 +94,7 @@ class VisualGenerationServiceTests(unittest.TestCase):
             max_repair_attempts=max_repair_attempts,
             renderer=renderer,
             cetz_agent=(
-                CetzGenerationAgent(cetz_client) if cetz_client is not None else None
+                CetzConversionAgent(cetz_client) if cetz_client is not None else None
             ),
             cetz_validator=(
                 CetzValidatorAgent(cetz_validator_client)
@@ -185,12 +185,14 @@ class VisualGenerationServiceTests(unittest.TestCase):
         )
         self.assertEqual(validator_payload["validation_mode"], "initial_validation")
 
-    def test_cetz_prompt_is_separate_from_tikz(self):
-        prompt = cetz_generation_system_prompt()
+    def test_cetz_prompt_converts_from_tikz(self):
+        prompt = cetz_conversion_system_prompt()
 
-        self.assertIn("CeTZGenerationAgent", prompt)
+        self.assertIn("CeTZConversionAgent", prompt)
+        self.assertIn("Convert the provided final TikZ source", prompt)
         self.assertIn("#cetz.canvas", prompt)
         self.assertIn("Do not include #import", prompt)
+        self.assertIn("path(..., close: true", prompt)
         self.assertIn('"cetz_source"', prompt)
 
     def test_generates_cetz_comparison_asset_without_replacing_tikz(self):
@@ -248,9 +250,13 @@ class VisualGenerationServiceTests(unittest.TestCase):
         self.assertEqual(result["comparison_backend"], "cetz")
         self.assertEqual(result["comparison_visual_validation_status"], "pass")
         self.assertIn("cetz_source", result["comparison_visual_assets"][0])
-        self.assertEqual(result["comparison_attempts"][0]["action"], "generate_cetz")
+        self.assertEqual(
+            result["comparison_attempts"][0]["action"],
+            "convert_tikz_to_cetz",
+        )
         cetz_payload = json.loads(cetz_client.messages[0][1]["content"])
         self.assertEqual(cetz_payload["visual_prompt"], "Draw a cart setup.")
+        self.assertIn("\\begin{tikzpicture}", cetz_payload["tikz_source"])
 
     def test_generates_rendered_png_asset_when_renderer_is_available(self):
         instruction_client = FakeChatClient(

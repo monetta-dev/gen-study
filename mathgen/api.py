@@ -38,7 +38,7 @@ from .models import (
 from .problem_renderer import ProblemRenderer, ProblemRenderError
 from .cetz_renderer import CetzRenderer
 from .visual_agents import (
-    CetzGenerationAgent,
+    CetzConversionAgent,
     CetzRepairAgent,
     CetzValidatorAgent,
     TikZGenerationAgent,
@@ -110,7 +110,7 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
         tikz_repair_agent=TikZRepairAgent(tikz_repair_client, tracer=tracer),
         max_repair_attempts=_env_int("VISUAL_TIKZ_REPAIR_ATTEMPTS", 2),
         renderer=renderer,
-        cetz_agent=CetzGenerationAgent(cetz_client, tracer=tracer),
+        cetz_agent=CetzConversionAgent(cetz_client, tracer=tracer),
         cetz_validator=CetzValidatorAgent(cetz_validator_client, tracer=tracer),
         cetz_repair_agent=CetzRepairAgent(cetz_repair_client, tracer=tracer),
         cetz_renderer=cetz_renderer,

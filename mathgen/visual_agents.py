@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Protocol
 
 from .agents import InteractionTracer, chat_json
@@ -68,10 +67,11 @@ Return exactly this JSON shape:
 {"tikz_source":"\\begin{tikzpicture}...\\end{tikzpicture}"}"""
 
 
-def cetz_generation_system_prompt() -> str:
-    return """You are CeTZGenerationAgent, an academic diagram author using Typst and CeTZ.
-Create precise CeTZ source for one Japanese university entrance-exam visual.
-Use the visual instruction, frozen visual_contract, problem, and solution as constraints.
+def cetz_conversion_system_prompt() -> str:
+    return """You are CeTZConversionAgent, a TikZ-to-CeTZ diagram translator.
+Convert the provided final TikZ source into equivalent CeTZ drawing code.
+Preserve the diagram's geometry, labels, placement, visual_contract, and exam-style intent as closely as possible.
+Use the visual instruction, frozen visual_contract, problem, and solution only to resolve ambiguity in the TikZ source.
 Return only CeTZ drawing code inside a JSON object.
 The CeTZ source must be the body of a #cetz.canvas({...}) block, not a full Typst document.
 Do not include #import, #cetz.canvas, markdown fences, explanatory text, LaTeX, or TikZ.
@@ -79,6 +79,7 @@ Use monochrome line-art style suitable for an exam booklet.
 Use clear mathematical labels and avoid unnecessary decoration.
 Prefer simple CeTZ primitives, coordinates, content labels, lines, arrows, dashed auxiliary lines, and plots when appropriate.
 Use Typst math syntax for labels when mathematical notation is needed.
+For arbitrary filled triangles or polygons, use path(..., close: true, fill: ..., stroke: ...). Do not use polygon(...) for a list of vertices; CeTZ polygon is for regular polygons and expects a side count.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {"cetz_source":"import cetz.draw: *\nline((0,0), (1,0))"}"""
@@ -131,6 +132,7 @@ Repair only the listed blocking issues. Do not reinterpret the diagram or change
 Return only the repaired CeTZ code inside a JSON object.
 The CeTZ source must be the body of a #cetz.canvas({...}) block, not a full Typst document.
 Do not include #import, #cetz.canvas, markdown fences, explanatory text, LaTeX, or TikZ.
+For arbitrary filled triangles or polygons, use path(..., close: true, fill: ..., stroke: ...). Do not use polygon(...) for a list of vertices; CeTZ polygon is for regular polygons and expects a side count.
 Use internal reasoning if available, but output only strict JSON.
 Return exactly this JSON shape:
 {"cetz_source":"import cetz.draw: *\nline((0,0), (1,0))"}"""
@@ -288,18 +290,21 @@ class TikZRepairAgent:
         )
 
 
-class CetzGenerationAgent:
+class CetzConversionAgent:
     def __init__(
         self, client: VisualChatClient, tracer: InteractionTracer | None = None
     ) -> None:
         self.client = client
         self.tracer = tracer or InteractionTracer()
 
-    def generate_cetz(
-        self, request: VisualGenerateRequest, instruction: VisualInstruction
+    def convert_tikz_to_cetz(
+        self,
+        request: VisualGenerateRequest,
+        instruction: VisualInstruction,
+        tikz_source: str,
     ) -> str:
         messages: list[dict[str, object]] = [
-            {"role": "system", "content": cetz_generation_system_prompt()},
+            {"role": "system", "content": cetz_conversion_system_prompt()},
             {
                 "role": "user",
                 "content": json.dumps(
@@ -315,13 +320,14 @@ class CetzGenerationAgent:
                         "must_not_include": list(instruction.must_not_include),
                         "problem": request.problem,
                         "solution": request.solution,
+                        "tikz_source": tikz_source,
                     },
                     ensure_ascii=False,
                 ),
             },
         ]
         return chat_json(
-            "CeTZGenerationAgent",
+            "CeTZConversionAgent",
             self.client,
             self.tracer,
             messages,
@@ -402,7 +408,7 @@ class VisualGenerationService:
         tikz_repair_agent: TikZRepairAgent,
         max_repair_attempts: int = 2,
         renderer: TikZRendererClient | None = None,
-        cetz_agent: CetzGenerationAgent | None = None,
+        cetz_agent: CetzConversionAgent | None = None,
         cetz_validator: CetzValidatorAgent | None = None,
         cetz_repair_agent: CetzRepairAgent | None = None,
         cetz_renderer: CetzRendererClient | None = None,
@@ -512,22 +518,21 @@ class VisualGenerationService:
             self._progress(f"Generating TikZ for {instruction.visual_id}.")
             return self._generate_one_tikz_visual(request, instruction), None
 
-        self._progress(
-            f"Generating TikZ and CeTZ for {instruction.visual_id} in parallel."
-        )
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            tikz_future = executor.submit(
-                self._generate_one_tikz_visual, request, instruction
+        self._progress(f"Generating TikZ for {instruction.visual_id}.")
+        tikz_result = self._generate_one_tikz_visual(request, instruction)
+        tikz_source = _tikz_source_from_asset(tikz_result.get("asset"))
+        if not tikz_source:
+            return tikz_result, _failed_cetz_result(
+                instruction,
+                ContractError("TikZ source was not available for CeTZ conversion"),
             )
-            cetz_future = executor.submit(
-                self._generate_one_cetz_visual, request, instruction
+        try:
+            cetz_result = self._generate_one_cetz_visual(
+                request, instruction, tikz_source
             )
-            tikz_result = tikz_future.result()
-            try:
-                cetz_result = cetz_future.result()
-            except Exception as exc:  # Keep the control experiment from breaking TikZ.
-                cetz_result = _failed_cetz_result(instruction, exc)
-            return tikz_result, cetz_result
+        except Exception as exc:  # Keep the control experiment from breaking TikZ.
+            cetz_result = _failed_cetz_result(instruction, exc)
+        return tikz_result, cetz_result
 
     def _generate_one_tikz_visual(
         self, request: VisualGenerateRequest, instruction: VisualInstruction
@@ -656,18 +661,25 @@ class VisualGenerationService:
             )
 
     def _generate_one_cetz_visual(
-        self, request: VisualGenerateRequest, instruction: VisualInstruction
+        self,
+        request: VisualGenerateRequest,
+        instruction: VisualInstruction,
+        tikz_source: str,
     ) -> dict[str, object]:
         assert self.cetz_agent is not None
         assert self.cetz_validator is not None
         assert self.cetz_repair_agent is not None
-        cetz_source = self.cetz_agent.generate_cetz(request, instruction)
+        self._progress(f"Converting TikZ to CeTZ for {instruction.visual_id}.")
+        cetz_source = self.cetz_agent.convert_tikz_to_cetz(
+            request, instruction, tikz_source
+        )
         active_issues: tuple[str, ...] = ()
         attempts: list[dict[str, object]] = [
             {
                 "visual_id": instruction.visual_id,
-                "action": "generate_cetz",
+                "action": "convert_tikz_to_cetz",
                 "prompt": instruction.prompt,
+                "tikz_source": tikz_source,
                 "cetz_source": cetz_source,
             }
         ]
@@ -893,6 +905,15 @@ def _tikz_asset(
     return asset
 
 
+def _tikz_source_from_asset(asset: object) -> str:
+    if not isinstance(asset, dict):
+        return ""
+    tikz_source = asset.get("tikz_source")
+    if not isinstance(tikz_source, str):
+        return ""
+    return tikz_source.strip()
+
+
 def _cetz_asset(
     instruction: VisualInstruction,
     cetz_source: str,
@@ -928,7 +949,7 @@ def _failed_cetz_result(
         "attempts": [
             {
                 "visual_id": instruction.visual_id,
-                "action": "generate_cetz",
+                "action": "convert_tikz_to_cetz",
                 "status": "failed",
                 "issues": [issue],
             }
