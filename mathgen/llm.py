@@ -1,4 +1,4 @@
-"""OpenCode Go Qwen client."""
+"""OpenRouter Qwen client."""
 
 from __future__ import annotations
 
@@ -10,15 +10,19 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
-QWEN_MAX_MODEL = "qwen3.7-max"
-QWEN_PLUS_MODEL = "qwen3.7-plus"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+QWEN_MAX_MODEL = "qwen/qwen3.7-max"
+QWEN_PLUS_MODEL = "qwen/qwen3.7-plus"
 QWEN_MODELS = {QWEN_MAX_MODEL, QWEN_PLUS_MODEL}
 QWEN_MODEL = QWEN_MAX_MODEL
+QWEN_MODEL_ALIASES = {
+    "qwen3.7-max": QWEN_MAX_MODEL,
+    "qwen3.7-plus": QWEN_PLUS_MODEL,
+}
 
 
 class LLMError(RuntimeError):
-    """Raised when the OpenCode Go API request fails."""
+    """Raised when the OpenRouter API request fails."""
 
 
 class EmptyStreamError(LLMError):
@@ -56,8 +60,8 @@ def _env_flag(name: str, default: bool) -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
-class OpenCodeGoClient:
-    """Qwen 3.7 client for OpenCode Go's Anthropic-compatible endpoint."""
+class OpenRouterQwenClient:
+    """Qwen 3.7 client for OpenRouter's OpenAI-compatible endpoint."""
 
     def __init__(
         self,
@@ -71,37 +75,44 @@ class OpenCodeGoClient:
         model: str | None = None,
         **_unused: Any,
     ) -> None:
-        self.api_key = api_key or _env_string("OPENCODE_GO_API_KEY")
-        self.base_url = (base_url or _env_string("OPENCODE_GO_BASE_URL", OPENCODE_GO_BASE_URL)).rstrip("/")
+        self.api_key = api_key or _env_string("OPENROUTER_API_KEY")
+        self.base_url = (
+            base_url or _env_string("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL)
+        ).rstrip("/")
         self.model = self._configured_model(model)
-        self.timeout_seconds = timeout_seconds or _env_float("OPENCODE_GO_TIMEOUT_SECONDS", 300.0)
-        self.max_tokens = max_tokens or _env_int("OPENCODE_GO_MAX_TOKENS", 32768)
+        self.timeout_seconds = timeout_seconds or _env_float("OPENROUTER_TIMEOUT_SECONDS", 300.0)
+        self.max_tokens = max_tokens or _env_int("OPENROUTER_MAX_TOKENS", 32768)
         self.thinking_budget_tokens = (
             thinking_budget_tokens
             if thinking_budget_tokens is not None
-            else _env_int("OPENCODE_GO_THINKING_BUDGET_TOKENS", 16384)
+            else _env_int("OPENROUTER_THINKING_BUDGET_TOKENS", 16384)
         )
-        self.thinking_display = _env_string("OPENCODE_GO_THINKING_DISPLAY", "omitted").lower()
         self.thinking_enabled = (
             thinking_enabled
             if thinking_enabled is not None
-            else _env_flag("OPENCODE_GO_THINKING_ENABLED", True)
+            else _env_flag("OPENROUTER_THINKING_ENABLED", True)
         )
-        self.stream = stream if stream is not None else _env_flag("OPENCODE_GO_STREAM", True)
-        self.retry_attempts = _env_int("OPENCODE_GO_RETRY_ATTEMPTS", 3)
-        self.retry_delay_seconds = _env_float("OPENCODE_GO_RETRY_DELAY_SECONDS", 10.0)
-        self.user_agent = _env_string("OPENCODE_GO_USER_AGENT", "gen-study/0.1 Qwen client")
+        self.stream = stream if stream is not None else _env_flag("OPENROUTER_STREAM", True)
+        self.retry_attempts = _env_int("OPENROUTER_RETRY_ATTEMPTS", 3)
+        self.retry_delay_seconds = _env_float("OPENROUTER_RETRY_DELAY_SECONDS", 10.0)
 
     def _configured_model(self, model: str | None) -> str:
-        configured_model = model or _env_string("OPENCODE_GO_MODEL", QWEN_MODEL)
+        configured_model = model or _env_string("OPENROUTER_MODEL", QWEN_MODEL)
+        configured_model = QWEN_MODEL_ALIASES.get(configured_model, configured_model)
         if configured_model not in QWEN_MODELS:
             allowed = ", ".join(sorted(QWEN_MODELS))
-            raise LLMError(f"OPENCODE_GO_MODEL must be one of: {allowed}")
+            raise LLMError(f"OPENROUTER_MODEL must be one of: {allowed}")
         return configured_model
 
     def chat(self, messages: list[dict[str, Any]]) -> str:
         if not self.api_key:
-            raise LLMError("OPENCODE_GO_API_KEY is not configured")
+            raise LLMError("OPENROUTER_API_KEY is not configured")
+        if not self.base_url:
+            raise LLMError("OPENROUTER_BASE_URL is not configured")
+        if "{" in self.base_url or "}" in self.base_url:
+            raise LLMError(
+                "OPENROUTER_BASE_URL still contains a placeholder"
+            )
         return self._chat_messages(messages)
 
     def _chat_messages(self, messages: list[dict[str, Any]]) -> str:
@@ -109,7 +120,6 @@ class OpenCodeGoClient:
             "model": self.model,
             "max_tokens": self.max_tokens,
             "temperature": 0.4,
-            "system": self._system_prompt(messages),
             "messages": self._messages(messages),
         }
         self._apply_thinking(payload)
@@ -119,95 +129,105 @@ class OpenCodeGoClient:
 
         def make_request() -> urllib.request.Request:
             return urllib.request.Request(
-                f"{self.base_url}/messages",
+                self._messages_url(),
                 data=data,
                 headers={
-                    "x-api-key": self.api_key,
-                    "anthropic-version": _env_string("OPENCODE_GO_ANTHROPIC_VERSION", "2023-06-01"),
+                    "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                     "Accept": "application/json",
-                    "User-Agent": self.user_agent,
                 },
                 method="POST",
             )
 
         if self.stream:
-            return self._open_stream_with_retries(make_request, self._read_messages_sse)
+            return self._open_stream_with_retries(
+                make_request, self._read_chat_completions_sse
+            )
 
         response_body = self._open_with_retries(make_request)
         try:
             decoded: dict[str, Any] = json.loads(response_body)
-            content = decoded["content"]
-            if isinstance(content, list):
-                return "".join(
-                    part.get("text", "")
-                    for part in content
-                    if isinstance(part, dict) and part.get("type") == "text"
-                )
+            content = decoded["choices"][0]["message"]["content"]
             if isinstance(content, str):
                 return content
-        except (KeyError, TypeError, json.JSONDecodeError) as exc:
-            raise LLMError("OpenCode Go response did not match messages format") from exc
-        raise LLMError("OpenCode Go response did not include text content")
+        except (IndexError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            raise LLMError(
+                "OpenRouter response did not match chat completions format"
+            ) from exc
+        raise LLMError("OpenRouter response did not include text content")
 
     def _open_stream_with_retries(self, make_request, reader) -> str:
         for attempt in range(self.retry_attempts + 1):
             try:
-                with urllib.request.urlopen(make_request(), timeout=self.timeout_seconds) as response:
+                with urllib.request.urlopen(
+                    make_request(), timeout=self.timeout_seconds
+                ) as response:
                     return reader(response)
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")
                 exc.close()
-                if not self._is_retryable_http_error(exc.code, body) or attempt >= self.retry_attempts:
-                    raise LLMError(f"OpenCode Go returned HTTP {exc.code}: {body}") from exc
+                if (
+                    not self._is_retryable_http_error(exc.code, body)
+                    or attempt >= self.retry_attempts
+                ):
+                    raise LLMError(
+                        f"OpenRouter returned HTTP {exc.code}: {body}"
+                    ) from exc
                 delay = self._retry_delay(body)
                 print(
-                    f"Retrying streaming OpenCode Go messages request after "
+                    f"Retrying streaming OpenRouter messages request after "
                     f"HTTP {exc.code} in {delay:g}s "
                     f"(attempt {attempt + 1}/{self.retry_attempts})",
                     flush=True,
                 )
                 time.sleep(delay)
             except urllib.error.URLError as exc:
-                raise LLMError(f"OpenCode Go request failed: {exc.reason}") from exc
+                raise LLMError(f"OpenRouter request failed: {exc.reason}") from exc
             except EmptyStreamError as exc:
                 if attempt >= self.retry_attempts:
                     raise LLMError(str(exc)) from exc
                 print(
-                    f"Retrying streaming OpenCode Go messages request after "
+                    f"Retrying streaming OpenRouter messages request after "
                     f"empty text stream ({exc}) in {self.retry_delay_seconds:g}s "
                     f"(attempt {attempt + 1}/{self.retry_attempts})",
                     flush=True,
                 )
                 time.sleep(self.retry_delay_seconds)
             except (http.client.HTTPException, TimeoutError, OSError) as exc:
-                raise LLMError(f"OpenCode Go connection failed: {exc}") from exc
-        raise LLMError("OpenCode Go streaming request failed")
+                raise LLMError(f"OpenRouter connection failed: {exc}") from exc
+        raise LLMError("OpenRouter streaming request failed")
 
     def _open_with_retries(self, make_request) -> str:
         for attempt in range(self.retry_attempts + 1):
             try:
-                with urllib.request.urlopen(make_request(), timeout=self.timeout_seconds) as response:
+                with urllib.request.urlopen(
+                    make_request(), timeout=self.timeout_seconds
+                ) as response:
                     return response.read().decode("utf-8")
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")
                 exc.close()
-                if not self._is_retryable_http_error(exc.code, body) or attempt >= self.retry_attempts:
-                    raise LLMError(f"OpenCode Go returned HTTP {exc.code}: {body}") from exc
+                if (
+                    not self._is_retryable_http_error(exc.code, body)
+                    or attempt >= self.retry_attempts
+                ):
+                    raise LLMError(
+                        f"OpenRouter returned HTTP {exc.code}: {body}"
+                    ) from exc
                 delay = self._retry_delay(body)
                 print(
-                    f"Retrying OpenCode Go messages request after HTTP {exc.code} "
+                    f"Retrying OpenRouter messages request after HTTP {exc.code} "
                     f"in {delay:g}s (attempt {attempt + 1}/{self.retry_attempts})",
                     flush=True,
                 )
                 time.sleep(delay)
             except urllib.error.URLError as exc:
-                raise LLMError(f"OpenCode Go request failed: {exc.reason}") from exc
+                raise LLMError(f"OpenRouter request failed: {exc.reason}") from exc
             except (http.client.HTTPException, TimeoutError, OSError) as exc:
-                raise LLMError(f"OpenCode Go connection failed: {exc}") from exc
-        raise LLMError("OpenCode Go request failed")
+                raise LLMError(f"OpenRouter connection failed: {exc}") from exc
+        raise LLMError("OpenRouter request failed")
 
-    def _read_messages_sse(self, response) -> str:
+    def _read_chat_completions_sse(self, response) -> str:
         text_parts = []
         for raw_line in response:
             line = raw_line.decode("utf-8", errors="replace").strip()
@@ -220,57 +240,68 @@ class OpenCodeGoClient:
                 event = json.loads(data)
             except json.JSONDecodeError:
                 continue
-            if event.get("type") == "error":
+            if "error" in event:
                 error = event.get("error", {})
                 message = error.get("message") or json.dumps(error, ensure_ascii=False)
-                raise LLMError(f"OpenCode Go streaming error: {message}")
-            if event.get("type") == "content_block_start":
-                block = event.get("content_block")
-                if isinstance(block, dict) and block.get("type") == "text":
-                    text_parts.append(block.get("text", ""))
-            delta = event.get("delta")
-            if isinstance(delta, dict) and delta.get("type") == "text_delta":
-                text_parts.append(delta.get("text", ""))
+                raise LLMError(f"OpenRouter streaming error: {message}")
+            choices = event.get("choices")
+            if not isinstance(choices, list) or not choices:
+                continue
+            delta = choices[0].get("delta", {})
+            if isinstance(delta, dict) and isinstance(delta.get("content"), str):
+                text_parts.append(delta["content"])
         text = "".join(text_parts)
         if not text:
-            raise EmptyStreamError("OpenCode Go streaming response did not include text content")
+            raise EmptyStreamError(
+                "OpenRouter streaming response did not include text content"
+            )
         return text
-
-    def _system_prompt(self, messages: list[dict[str, Any]]) -> str:
-        return "\n\n".join(
-            message["content"]
-            for message in messages
-            if message.get("role") == "system"
-            and isinstance(message.get("content"), str)
-            and message.get("content")
-        )
 
     def _messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         converted = []
         for message in messages:
             role = message.get("role")
-            if role == "system":
-                continue
-            if role not in {"user", "assistant"}:
+            if role not in {"system", "user", "assistant"}:
                 role = "user"
-            converted.append({"role": role, "content": message.get("content", "")})
+            converted.append(
+                {"role": role, "content": self._content(message.get("content", ""))}
+            )
         return converted
+
+    def _content(self, content: Any) -> Any:
+        if not isinstance(content, list):
+            return content
+        converted = []
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "image":
+                converted.append(block)
+                continue
+            source = block.get("source", {})
+            if not isinstance(source, dict):
+                converted.append(block)
+                continue
+            if source.get("type") == "base64":
+                media_type = source.get("media_type", "image/png")
+                url = f"data:{media_type};base64,{source.get('data', '')}"
+            else:
+                url = source.get("url", "")
+            converted.append({"type": "image_url", "image_url": {"url": url}})
+        return converted
+
+    def _messages_url(self) -> str:
+        return f"{self.base_url}/chat/completions"
 
     def _apply_thinking(self, payload: dict[str, Any]) -> None:
         if not self.thinking_enabled:
+            payload["reasoning"] = {"enabled": False}
             return
-        if self.thinking_budget_tokens >= self.max_tokens:
-            raise LLMError(
-                "OPENCODE_GO_THINKING_BUDGET_TOKENS must be less than "
-                "OPENCODE_GO_MAX_TOKENS"
-            )
-        thinking = {
-            "type": "enabled",
-            "budget_tokens": self.thinking_budget_tokens,
+        if self.thinking_budget_tokens <= 0:
+            raise LLMError("OPENROUTER_THINKING_BUDGET_TOKENS must be positive")
+        payload["reasoning"] = {
+            "enabled": True,
+            "max_tokens": self.thinking_budget_tokens,
+            "exclude": True,
         }
-        if self.thinking_display in {"omitted", "summarized"}:
-            thinking["display"] = self.thinking_display
-        payload["thinking"] = thinking
 
     def _is_retryable_http_error(self, code: int, body: str) -> bool:
         if code in {408, 409, 425, 429, 500, 502, 503, 504, 524}:

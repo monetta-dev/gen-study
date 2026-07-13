@@ -6,7 +6,7 @@ import urllib.error
 import unittest
 from unittest.mock import patch
 
-from mathgen.llm import LLMError, OpenCodeGoClient, QWEN_MODEL, QWEN_PLUS_MODEL
+from mathgen.llm import LLMError, OpenRouterQwenClient, QWEN_MODEL, QWEN_PLUS_MODEL
 
 
 class FakeMessagesResponse:
@@ -18,7 +18,7 @@ class FakeMessagesResponse:
 
     def read(self):
         return json.dumps(
-            {"content": [{"type": "text", "text": '{"problem":"p","solution":"s"}'}]}
+            {"choices": [{"message": {"content": '{"problem":"p","solution":"s"}'}}]}
         ).encode("utf-8")
 
 
@@ -31,22 +31,15 @@ class FakeStreamingMessagesResponse:
 
     def __iter__(self):
         lines = [
-            'event: message_start\n',
-            'data: {"type":"message_start","message":{"content":[]}}\n',
+            'data: {"choices":[{"delta":{"content":"{\\"problem\\":\\"p\\","}}]}\n',
             '\n',
-            'event: content_block_delta\n',
-            'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{\\"problem\\":\\"p\\","}}\n',
-            '\n',
-            'event: content_block_delta\n',
-            'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\\"solution\\":\\"s\\"}"}}\n',
-            '\n',
-            'event: message_stop\n',
-            'data: {"type":"message_stop"}\n',
+            'data: {"choices":[{"delta":{"content":"\\"solution\\":\\"s\\"}"}}]}\n',
+            'data: [DONE]\n',
         ]
         return iter(line.encode("utf-8") for line in lines)
 
 
-class FakeContentBlockStartTextResponse:
+class FakeSingleChunkStreamingResponse:
     def __enter__(self):
         return self
 
@@ -55,11 +48,8 @@ class FakeContentBlockStartTextResponse:
 
     def __iter__(self):
         lines = [
-            'event: content_block_start\n',
-            'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":"{\\"problem\\":\\"p\\",\\"solution\\":\\"s\\"}"}}\n',
-            '\n',
-            'event: message_stop\n',
-            'data: {"type":"message_stop"}\n',
+            'data: {"choices":[{"delta":{"content":"{\\"problem\\":\\"p\\",\\"solution\\":\\"s\\"}"}}]}\n',
+            'data: [DONE]\n',
         ]
         return iter(line.encode("utf-8") for line in lines)
 
@@ -82,28 +72,28 @@ class FakeEmptyStreamingResponse:
         return iter(line.encode("utf-8") for line in lines)
 
 
-class OpenCodeGoClientTests(unittest.TestCase):
+class OpenRouterQwenClientTests(unittest.TestCase):
     def setUp(self):
         self.previous_env = {
             key: os.environ.get(key)
             for key in (
-                "OPENCODE_GO_API_KEY",
-                "OPENCODE_GO_BASE_URL",
-                "OPENCODE_GO_MODEL",
-                "OPENCODE_GO_TIMEOUT_SECONDS",
-                "OPENCODE_GO_MAX_TOKENS",
-                "OPENCODE_GO_THINKING_BUDGET_TOKENS",
-                "OPENCODE_GO_THINKING_DISPLAY",
-                "OPENCODE_GO_THINKING_ENABLED",
-                "OPENCODE_GO_ANTHROPIC_VERSION",
-                "OPENCODE_GO_STREAM",
-                "OPENCODE_GO_USER_AGENT",
-                "OPENCODE_GO_RETRY_ATTEMPTS",
-                "OPENCODE_GO_RETRY_DELAY_SECONDS",
+                "OPENROUTER_API_KEY",
+                "OPENROUTER_BASE_URL",
+                "OPENROUTER_MODEL",
+                "OPENROUTER_TIMEOUT_SECONDS",
+                "OPENROUTER_MAX_TOKENS",
+                "OPENROUTER_THINKING_BUDGET_TOKENS",
+                "OPENROUTER_THINKING_ENABLED",
+                "OPENROUTER_STREAM",
+                "OPENROUTER_RETRY_ATTEMPTS",
+                "OPENROUTER_RETRY_DELAY_SECONDS",
             )
         }
         for key in self.previous_env:
             os.environ.pop(key, None)
+        os.environ["OPENROUTER_BASE_URL"] = (
+            "https://openrouter.ai/api/v1"
+        )
 
     def tearDown(self):
         for key, value in self.previous_env.items():
@@ -122,9 +112,9 @@ class OpenCodeGoClientTests(unittest.TestCase):
             captured["payload"] = json.loads(request.data.decode("utf-8"))
             return FakeStreamingMessagesResponse()
 
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
 
-        client = OpenCodeGoClient()
+        client = OpenRouterQwenClient()
 
         with patch("urllib.request.urlopen", fake_urlopen):
             content = client.chat(
@@ -135,26 +125,22 @@ class OpenCodeGoClientTests(unittest.TestCase):
             )
 
         self.assertEqual(content, '{"problem":"p","solution":"s"}')
-        self.assertEqual(captured["url"], "https://opencode.ai/zen/go/v1/messages")
+        self.assertEqual(captured["url"], "https://openrouter.ai/api/v1/chat/completions")
         self.assertEqual(captured["timeout"], 300)
-        self.assertEqual(captured["headers"]["X-api-key"], "opencode-key")
-        self.assertEqual(captured["headers"]["Anthropic-version"], "2023-06-01")
-        self.assertEqual(captured["headers"]["User-agent"], "gen-study/0.1 Qwen client")
+        self.assertEqual(captured["headers"]["Authorization"], "Bearer dashscope-key")
         self.assertEqual(captured["payload"]["model"], QWEN_MODEL)
         self.assertEqual(captured["payload"]["max_tokens"], 32768)
         self.assertEqual(captured["payload"]["stream"], True)
-        self.assertEqual(captured["payload"]["system"], "Return strict JSON.")
         self.assertEqual(
             captured["payload"]["messages"],
-            [{"role": "user", "content": "Generate a question."}],
+            [
+                {"role": "system", "content": "Return strict JSON."},
+                {"role": "user", "content": "Generate a question."},
+            ],
         )
         self.assertEqual(
-            captured["payload"]["thinking"],
-            {
-                "type": "enabled",
-                "budget_tokens": 16384,
-                "display": "omitted",
-            },
+            captured["payload"]["reasoning"],
+            {"enabled": True, "max_tokens": 16384, "exclude": True},
         )
 
     def test_streaming_can_be_disabled(self):
@@ -164,16 +150,39 @@ class OpenCodeGoClientTests(unittest.TestCase):
             captured["payload"] = json.loads(request.data.decode("utf-8"))
             return FakeMessagesResponse()
 
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_STREAM"] = "false"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_STREAM"] = "false"
 
-        client = OpenCodeGoClient()
+        client = OpenRouterQwenClient()
 
         with patch("urllib.request.urlopen", fake_urlopen):
             content = client.chat([{"role": "user", "content": "hello"}])
 
         self.assertEqual(content, '{"problem":"p","solution":"s"}')
         self.assertNotIn("stream", captured["payload"])
+
+    def test_custom_base_url_adds_chat_completions_path(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            return FakeMessagesResponse()
+
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_BASE_URL"] = (
+            "https://example.test/api/v1"
+        )
+        os.environ["OPENROUTER_STREAM"] = "false"
+
+        client = OpenRouterQwenClient()
+
+        with patch("urllib.request.urlopen", fake_urlopen):
+            client.chat([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(
+            captured["url"],
+            "https://example.test/api/v1/chat/completions",
+        )
 
     def test_global_model_can_use_qwen_plus(self):
         captured = {}
@@ -182,16 +191,23 @@ class OpenCodeGoClientTests(unittest.TestCase):
             captured["payload"] = json.loads(request.data.decode("utf-8"))
             return FakeMessagesResponse()
 
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_MODEL"] = QWEN_PLUS_MODEL
-        os.environ["OPENCODE_GO_STREAM"] = "false"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_MODEL"] = QWEN_PLUS_MODEL
+        os.environ["OPENROUTER_STREAM"] = "false"
 
-        client = OpenCodeGoClient()
+        client = OpenRouterQwenClient()
 
         with patch("urllib.request.urlopen", fake_urlopen):
             client.chat([{"role": "user", "content": "hello"}])
 
         self.assertEqual(captured["payload"]["model"], QWEN_PLUS_MODEL)
+
+    def test_legacy_role_model_alias_maps_to_openrouter_id(self):
+        os.environ["OPENROUTER_API_KEY"] = "openrouter-key"
+
+        client = OpenRouterQwenClient(model="qwen3.7-plus")
+
+        self.assertEqual(client.model, QWEN_PLUS_MODEL)
 
     def test_explicit_model_overrides_global_model(self):
         captured = {}
@@ -200,11 +216,11 @@ class OpenCodeGoClientTests(unittest.TestCase):
             captured["payload"] = json.loads(request.data.decode("utf-8"))
             return FakeMessagesResponse()
 
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_MODEL"] = QWEN_PLUS_MODEL
-        os.environ["OPENCODE_GO_STREAM"] = "false"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_MODEL"] = QWEN_PLUS_MODEL
+        os.environ["OPENROUTER_STREAM"] = "false"
 
-        client = OpenCodeGoClient(model=QWEN_MODEL)
+        client = OpenRouterQwenClient(model=QWEN_MODEL)
 
         with patch("urllib.request.urlopen", fake_urlopen):
             client.chat([{"role": "user", "content": "hello"}])
@@ -218,16 +234,16 @@ class OpenCodeGoClientTests(unittest.TestCase):
             captured["payload"] = json.loads(request.data.decode("utf-8"))
             return FakeMessagesResponse()
 
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_STREAM"] = "false"
-        os.environ["OPENCODE_GO_THINKING_ENABLED"] = "false"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_STREAM"] = "false"
+        os.environ["OPENROUTER_THINKING_ENABLED"] = "false"
 
-        client = OpenCodeGoClient()
+        client = OpenRouterQwenClient()
 
         with patch("urllib.request.urlopen", fake_urlopen):
             client.chat([{"role": "user", "content": "hello"}])
 
-        self.assertNotIn("thinking", captured["payload"])
+        self.assertEqual(captured["payload"]["reasoning"], {"enabled": False})
 
     def test_messages_preserve_multimodal_content_blocks(self):
         captured = {}
@@ -236,10 +252,10 @@ class OpenCodeGoClientTests(unittest.TestCase):
             captured["payload"] = json.loads(request.data.decode("utf-8"))
             return FakeMessagesResponse()
 
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_STREAM"] = "false"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_STREAM"] = "false"
 
-        client = OpenCodeGoClient()
+        client = OpenRouterQwenClient()
 
         with patch("urllib.request.urlopen", fake_urlopen):
             client.chat(
@@ -263,16 +279,16 @@ class OpenCodeGoClientTests(unittest.TestCase):
             )
 
         self.assertEqual(
-            captured["payload"]["messages"][0]["content"][1]["source"]["data"],
-            "png-base64",
+            captured["payload"]["messages"][1]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,png-base64",
         )
 
-    def test_stream_reader_accepts_content_block_start_text(self):
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
+    def test_stream_reader_accepts_single_content_chunk(self):
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
 
-        client = OpenCodeGoClient()
+        client = OpenRouterQwenClient()
 
-        with patch("urllib.request.urlopen", lambda request, timeout: FakeContentBlockStartTextResponse()):
+        with patch("urllib.request.urlopen", lambda request, timeout: FakeSingleChunkStreamingResponse()):
             content = client.chat([{"role": "user", "content": "hello"}])
 
         self.assertEqual(content, '{"problem":"p","solution":"s"}')
@@ -286,11 +302,11 @@ class OpenCodeGoClientTests(unittest.TestCase):
                 return FakeEmptyStreamingResponse()
             return FakeStreamingMessagesResponse()
 
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_RETRY_ATTEMPTS"] = "1"
-        os.environ["OPENCODE_GO_RETRY_DELAY_SECONDS"] = "0"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_RETRY_ATTEMPTS"] = "1"
+        os.environ["OPENROUTER_RETRY_DELAY_SECONDS"] = "0"
 
-        client = OpenCodeGoClient()
+        client = OpenRouterQwenClient()
 
         with patch("urllib.request.urlopen", fake_urlopen):
             content = client.chat([{"role": "user", "content": "hello"}])
@@ -305,35 +321,74 @@ class OpenCodeGoClientTests(unittest.TestCase):
             captured["payload"] = json.loads(request.data.decode("utf-8"))
             return FakeMessagesResponse()
 
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_MAX_TOKENS"] = ""
-        os.environ["OPENCODE_GO_THINKING_BUDGET_TOKENS"] = ""
-        os.environ["OPENCODE_GO_STREAM"] = "false"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_MAX_TOKENS"] = ""
+        os.environ["OPENROUTER_THINKING_BUDGET_TOKENS"] = ""
+        os.environ["OPENROUTER_STREAM"] = "false"
 
-        client = OpenCodeGoClient()
+        client = OpenRouterQwenClient()
 
         with patch("urllib.request.urlopen", fake_urlopen):
             client.chat([{"role": "user", "content": "hello"}])
 
         self.assertEqual(captured["payload"]["max_tokens"], 32768)
-        self.assertEqual(captured["payload"]["thinking"]["budget_tokens"], 16384)
+        self.assertEqual(captured["payload"]["reasoning"]["max_tokens"], 16384)
 
-    def test_rejects_thinking_budget_greater_than_max_tokens(self):
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_MAX_TOKENS"] = "8192"
-        os.environ["OPENCODE_GO_THINKING_BUDGET_TOKENS"] = "8192"
+    def test_thinking_budget_is_independent_from_max_tokens(self):
+        captured = {}
 
-        client = OpenCodeGoClient()
+        def fake_urlopen(request, timeout):
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return FakeMessagesResponse()
 
-        with self.assertRaisesRegex(LLMError, "must be less"):
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_MAX_TOKENS"] = "8192"
+        os.environ["OPENROUTER_THINKING_BUDGET_TOKENS"] = "8192"
+        os.environ["OPENROUTER_STREAM"] = "false"
+
+        client = OpenRouterQwenClient()
+
+        with patch("urllib.request.urlopen", fake_urlopen):
+            client.chat([{"role": "user", "content": "hello"}])
+
+        self.assertEqual(captured["payload"]["max_tokens"], 8192)
+        self.assertEqual(captured["payload"]["reasoning"]["max_tokens"], 8192)
+
+    def test_rejects_non_positive_thinking_budget(self):
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_THINKING_BUDGET_TOKENS"] = "0"
+
+        client = OpenRouterQwenClient()
+
+        with self.assertRaisesRegex(LLMError, "must be positive"):
+            client.chat([{"role": "user", "content": "hello"}])
+
+    def test_requires_api_key(self):
+        os.environ.pop("OPENROUTER_API_KEY", None)
+
+        client = OpenRouterQwenClient()
+
+        with self.assertRaisesRegex(LLMError, "OPENROUTER_API_KEY"):
+            client.chat([{"role": "user", "content": "hello"}])
+
+    def test_rejects_unresolved_workspace_placeholder(self):
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_BASE_URL"] = (
+            "https://{WorkspaceId}.ap-northeast-1.maas.aliyuncs.com/"
+            "compatible-mode/v1"
+        )
+
+        client = OpenRouterQwenClient()
+
+        with self.assertRaisesRegex(LLMError, "contains a placeholder"):
             client.chat([{"role": "user", "content": "hello"}])
 
     def test_rejects_non_qwen_model_override(self):
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_MODEL"] = "other-model"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_MODEL"] = "other-model"
 
         with self.assertRaisesRegex(LLMError, "qwen3.7"):
-            OpenCodeGoClient()
+            OpenRouterQwenClient()
 
     def test_retryable_http_error_retries_then_succeeds(self):
         calls = []
@@ -350,12 +405,12 @@ class OpenCodeGoClientTests(unittest.TestCase):
                 )
             return FakeMessagesResponse()
 
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_STREAM"] = "false"
-        os.environ["OPENCODE_GO_RETRY_ATTEMPTS"] = "1"
-        os.environ["OPENCODE_GO_RETRY_DELAY_SECONDS"] = "0"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_STREAM"] = "false"
+        os.environ["OPENROUTER_RETRY_ATTEMPTS"] = "1"
+        os.environ["OPENROUTER_RETRY_DELAY_SECONDS"] = "0"
 
-        client = OpenCodeGoClient()
+        client = OpenRouterQwenClient()
 
         with patch("urllib.request.urlopen", fake_urlopen):
             content = client.chat([{"role": "user", "content": "hello"}])
@@ -376,10 +431,10 @@ class OpenCodeGoClientTests(unittest.TestCase):
                 io.BytesIO(b'{"retryable":false}'),
             )
 
-        os.environ["OPENCODE_GO_API_KEY"] = "opencode-key"
-        os.environ["OPENCODE_GO_RETRY_ATTEMPTS"] = "2"
+        os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
+        os.environ["OPENROUTER_RETRY_ATTEMPTS"] = "2"
 
-        client = OpenCodeGoClient()
+        client = OpenRouterQwenClient()
 
         with patch("urllib.request.urlopen", fake_urlopen):
             with self.assertRaisesRegex(LLMError, "HTTP 403"):
@@ -391,7 +446,7 @@ class OpenCodeGoClientTests(unittest.TestCase):
         def fake_urlopen(request, timeout):
             raise http.client.RemoteDisconnected("remote end closed connection")
 
-        client = OpenCodeGoClient(api_key="test-key", base_url="https://example.test")
+        client = OpenRouterQwenClient(api_key="test-key", base_url="https://example.test")
 
         with patch("urllib.request.urlopen", fake_urlopen):
             with self.assertRaisesRegex(LLMError, "connection failed"):

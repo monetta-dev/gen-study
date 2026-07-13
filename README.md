@@ -17,26 +17,24 @@ runtime, and returns rendered PNG assets. Requests to `/generate` containing
 ## Requirements
 
 - Python 3.11+
-- `OPENCODE_GO_API_KEY` in `.env.local` or the shell environment
+- `OPENROUTER_API_KEY` in `.env.local` or the shell environment
+- Optional: `OPENROUTER_BASE_URL`, defaults to `https://openrouter.ai/api/v1`
 - Optional visual API setting: `VISUAL_TIKZ_REPAIR_ATTEMPTS`, defaults to `2`
-- Optional: `OPENCODE_GO_BASE_URL`, defaults to `https://opencode.ai/zen/go/v1`
-- Optional: `OPENCODE_GO_MODEL`, defaults to `qwen3.7-max`; allowed values are
-  `qwen3.7-max` and `qwen3.7-plus`
-- Optional: `OPENCODE_GO_TIMEOUT_SECONDS`, defaults to `300`
-- Optional: `OPENCODE_GO_MAX_TOKENS`, defaults to `32768`
-- Optional: `OPENCODE_GO_STREAM`, defaults to `true`
-- Optional: `OPENCODE_GO_THINKING_ENABLED`, defaults to `true`
-- Optional: `OPENCODE_GO_THINKING_BUDGET_TOKENS`, defaults to `16384`
-- Optional: `OPENCODE_GO_THINKING_DISPLAY`, defaults to `omitted`
-- Optional: `OPENCODE_GO_RETRY_ATTEMPTS`, defaults to `3`
-- Optional: `OPENCODE_GO_RETRY_DELAY_SECONDS`, defaults to `10`
+- Optional: `OPENROUTER_MODEL`, defaults to `qwen/qwen3.7-max`
+- Optional: `OPENROUTER_TIMEOUT_SECONDS`, defaults to `300`
+- Optional: `OPENROUTER_MAX_TOKENS`, defaults to `32768`
+- Optional: `OPENROUTER_STREAM`, defaults to `true`
+- Optional: `OPENROUTER_THINKING_ENABLED`, defaults to `true`
+- Optional: `OPENROUTER_THINKING_BUDGET_TOKENS`, defaults to `16384`
+- Optional: `OPENROUTER_RETRY_ATTEMPTS`, defaults to `3`
+- Optional: `OPENROUTER_RETRY_DELAY_SECONDS`, defaults to `10`
 - Optional narrow-agent thinking-budget overrides such as
   `COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS` and
   `VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS`; blank means use the main
   Qwen thinking settings
 - Optional per-agent model overrides such as `GENERATOR_MODEL`,
   `COMPLIANCE_VALIDATOR_MODEL`, and `VISUAL_TIKZ_MODEL`; blank means use
-  `OPENCODE_GO_MODEL`
+  `OPENROUTER_MODEL`
 - Optional: `MAX_REPAIR_ATTEMPTS`; blank means no hard repair limit
 - Optional: `GENERATION_TRACE`, defaults to `false`
 - Optional: `API_HOST`, defaults to `127.0.0.1`
@@ -59,20 +57,17 @@ cp .env.example .env.local
 Then edit `.env.local` and set your actual API key:
 
 ```dotenv
-OPENCODE_GO_API_KEY=your_opencode_go_api_key_here
+OPENROUTER_API_KEY=your_openrouter_api_key_here
 VISUAL_TIKZ_REPAIR_ATTEMPTS=2
-OPENCODE_GO_BASE_URL=https://opencode.ai/zen/go/v1
-OPENCODE_GO_MODEL=qwen3.7-max
-OPENCODE_GO_STREAM=true
-OPENCODE_GO_TIMEOUT_SECONDS=300
-OPENCODE_GO_MAX_TOKENS=32768
-OPENCODE_GO_THINKING_ENABLED=true
-OPENCODE_GO_THINKING_BUDGET_TOKENS=16384
-OPENCODE_GO_THINKING_DISPLAY=omitted
-OPENCODE_GO_ANTHROPIC_VERSION=2023-06-01
-OPENCODE_GO_USER_AGENT=gen-study/0.1 Qwen client
-OPENCODE_GO_RETRY_ATTEMPTS=3
-OPENCODE_GO_RETRY_DELAY_SECONDS=10
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_MODEL=qwen/qwen3.7-max
+OPENROUTER_STREAM=true
+OPENROUTER_TIMEOUT_SECONDS=300
+OPENROUTER_MAX_TOKENS=32768
+OPENROUTER_THINKING_ENABLED=true
+OPENROUTER_THINKING_BUDGET_TOKENS=16384
+OPENROUTER_RETRY_ATTEMPTS=3
+OPENROUTER_RETRY_DELAY_SECONDS=10
 GENERATOR_MODEL=
 REPAIR_MODEL=
 CRITICAL_VALIDATOR_MODEL=
@@ -142,26 +137,26 @@ includes the exception message. Keep `API_DEBUG=false` in production.
 
 ## Model Provider
 
-The backend is standardized on OpenCode Go with Qwen 3.7. Max is the default;
-Plus can be selected globally or per agent.
+The backend uses OpenRouter with Qwen 3.7. Max is the default; Plus can be
+selected globally or per agent.
 
 For Qwen 3.7 Max everywhere, configure Render or `.env.local` like this:
 
 ```dotenv
-OPENCODE_GO_API_KEY=your_opencode_go_api_key
-OPENCODE_GO_MODEL=qwen3.7-max
-OPENCODE_GO_STREAM=true
-OPENCODE_GO_THINKING_ENABLED=true
-OPENCODE_GO_THINKING_DISPLAY=omitted
+OPENROUTER_API_KEY=your_openrouter_api_key
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_MODEL=qwen/qwen3.7-max
+OPENROUTER_STREAM=true
+OPENROUTER_THINKING_ENABLED=true
 ```
 
 For Qwen 3.7 Plus everywhere:
 
 ```dotenv
-OPENCODE_GO_MODEL=qwen3.7-plus
+OPENROUTER_MODEL=qwen/qwen3.7-plus
 ```
 
-For a per-agent override, leave `OPENCODE_GO_MODEL` as the default and set the
+For a per-agent override, leave `OPENROUTER_MODEL` as the default and set the
 specific role:
 
 ```dotenv
@@ -170,33 +165,32 @@ COMPLIANCE_VALIDATOR_MODEL=qwen3.7-plus
 VISUAL_TIKZ_VALIDATOR_MODEL=qwen3.7-plus
 ```
 
-Supported model values are only:
+The provider model IDs are:
 
 ```text
-qwen3.7-max
-qwen3.7-plus
+qwen/qwen3.7-max
+qwen/qwen3.7-plus
 ```
 
 This calls:
 
 ```text
-POST https://opencode.ai/zen/go/v1/messages
+POST https://openrouter.ai/api/v1/chat/completions
 ```
 
-The client uses the Anthropic-compatible `/messages` endpoint. It uses internal
+The client uses the OpenAI-compatible Chat Completions endpoint. It uses internal
 SSE streaming by default, then collects the streamed text and returns the same
 normal JSON response from this API.
 
 Thinking is sent as:
 
 ```json
-{"thinking":{"type":"enabled","budget_tokens":16384,"display":"omitted"}}
+{"reasoning":{"enabled":true,"max_tokens":16384,"exclude":true}}
 ```
 
-`OPENCODE_GO_THINKING_BUDGET_TOKENS` must be less than
-`OPENCODE_GO_MAX_TOKENS`. These are optional advanced overrides; the defaults
-are intentionally high now that streaming avoids the Cloudflare read-timeout
-problem.
+When thinking is disabled, the client sends `{"reasoning":{"enabled":false}}`.
+`OPENROUTER_THINKING_BUDGET_TOKENS` controls reasoning tokens, while
+`OPENROUTER_MAX_TOKENS` independently controls final-answer tokens.
 
 Role-specific thinking-budget overrides are supported for every agent. Leave
 these blank to keep the main high-quality Qwen thinking budget everywhere.
@@ -223,12 +217,10 @@ GENERATOR_THINKING_BUDGET_TOKENS=8192
 GENERATOR_MAX_TOKENS=24576
 ```
 
-Leave these blank to use the global `OPENCODE_GO_THINKING_BUDGET_TOKENS` and
-`OPENCODE_GO_MAX_TOKENS`. If `GENERATOR_MODEL=qwen3.7-plus` produces repeated
-`HTTP 524` or empty-stream retries, the provider is not returning final text
-within the current budget/timeout; either reduce the Generator budget after
-quality testing or keep the Generator on `qwen3.7-max` and use Plus for narrower
-agents.
+Leave these blank to use the global `OPENROUTER_THINKING_BUDGET_TOKENS` and
+`OPENROUTER_MAX_TOKENS`. If a call repeatedly times out or yields an empty
+stream, reduce the role-specific thinking budget after quality testing or
+increase `OPENROUTER_TIMEOUT_SECONDS`.
 
 Role-specific model overrides are also supported:
 
@@ -287,18 +279,10 @@ The Docker image installs `texlive-full` and `poppler-utils`; `texlive-full`
 covers the LaTeX package surface, while `poppler-utils` provides `pdftoppm` for
 PNG conversion.
 
-If OpenCode Go returns Cloudflare 1010 `browser_signature_banned`, the request
-was blocked before reaching the LLM API. The client sends
-`OPENCODE_GO_USER_AGENT` on all provider calls; try setting it to a stable
-application identifier. If the same 1010 response persists, OpenCode must allow
-server-side API clients or document the required client signature.
-
-If OpenCode Go returns Cloudflare 524 `origin_response_timeout`, the model call
-is taking too long for Cloudflare's edge timeout. Keep
-`OPENCODE_GO_STREAM=true` so the provider can send SSE chunks while it works.
-Retryable provider errors such as 524, 429, and common 5xx responses are retried
-according to `OPENCODE_GO_RETRY_ATTEMPTS` and
-`OPENCODE_GO_RETRY_DELAY_SECONDS`.
+Keep `OPENROUTER_STREAM=true` for long thinking calls so the provider can send
+SSE events while it works. Retryable provider errors such as 429 and common
+5xx responses are retried according to `OPENROUTER_RETRY_ATTEMPTS` and
+`OPENROUTER_RETRY_DELAY_SECONDS`.
 
 ## Production
 

@@ -292,7 +292,7 @@ class ApiTests(unittest.TestCase):
         previous = {
             key: os.environ.get(key)
             for key in (
-                "OPENCODE_GO_API_KEY",
+                "OPENROUTER_API_KEY",
                 "GENERATOR_MODEL",
                 "REPAIR_MODEL",
                 "CRITICAL_VALIDATOR_MODEL",
@@ -306,7 +306,7 @@ class ApiTests(unittest.TestCase):
         previous_cwd = os.getcwd()
         calls = []
 
-        class FakeOpenCodeClient:
+        class FakeOpenRouterQwenClient:
             def __init__(self, **kwargs):
                 calls.append(kwargs)
 
@@ -316,7 +316,7 @@ class ApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
                 os.chdir(tmpdir)
-                os.environ["OPENCODE_GO_API_KEY"] = "test-key"
+                os.environ["OPENROUTER_API_KEY"] = "test-key"
                 os.environ["GENERATOR_MODEL"] = "qwen3.7-plus"
                 os.environ.pop("REPAIR_MODEL", None)
                 os.environ.pop("CRITICAL_VALIDATOR_MODEL", None)
@@ -325,7 +325,7 @@ class ApiTests(unittest.TestCase):
                 os.environ["CRITICAL_VALIDATOR_THINKING_BUDGET_TOKENS"] = "8192"
                 os.environ["COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS"] = "4096"
                 os.environ["COMPLIANCE_VALIDATOR_THINKING_ENABLED"] = "true"
-                with patch.object(api_module, "OpenCodeGoClient", FakeOpenCodeClient):
+                with patch.object(api_module, "OpenRouterQwenClient", FakeOpenRouterQwenClient):
                     api_module.build_service()
             finally:
                 os.chdir(previous_cwd)
@@ -380,7 +380,7 @@ class ApiTests(unittest.TestCase):
         previous = {
             key: os.environ.get(key)
             for key in (
-                "OPENCODE_GO_API_KEY",
+                "OPENROUTER_API_KEY",
                 "VISUAL_INSTRUCTION_THINKING_BUDGET_TOKENS",
                 "VISUAL_TIKZ_THINKING_BUDGET_TOKENS",
                 "VISUAL_TIKZ_COMPILE_THINKING_BUDGET_TOKENS",
@@ -392,7 +392,7 @@ class ApiTests(unittest.TestCase):
         previous_cwd = os.getcwd()
         calls = []
 
-        class FakeOpenCodeClient:
+        class FakeOpenRouterQwenClient:
             def __init__(self, **kwargs):
                 calls.append(kwargs)
 
@@ -402,14 +402,14 @@ class ApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             try:
                 os.chdir(tmpdir)
-                os.environ["OPENCODE_GO_API_KEY"] = "test-key"
+                os.environ["OPENROUTER_API_KEY"] = "test-key"
                 os.environ["VISUAL_INSTRUCTION_THINKING_BUDGET_TOKENS"] = "1024"
                 os.environ["VISUAL_TIKZ_THINKING_BUDGET_TOKENS"] = "8192"
                 os.environ["VISUAL_TIKZ_COMPILE_THINKING_BUDGET_TOKENS"] = "3072"
                 os.environ["VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS"] = "2048"
                 os.environ["VISUAL_TIKZ_REPAIR_THINKING_BUDGET_TOKENS"] = "4096"
                 os.environ["VISUAL_RENDER_ENABLED"] = "true"
-                with patch.object(api_module, "OpenCodeGoClient", FakeOpenCodeClient):
+                with patch.object(api_module, "OpenRouterQwenClient", FakeOpenRouterQwenClient):
                     api_module.build_visual_service()
             finally:
                 os.chdir(previous_cwd)

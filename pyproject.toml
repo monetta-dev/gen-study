@@ -1,7 +1,7 @@
 [project]
 name = "gen-study"
 version = "0.1.0"
-description = "Entrance exam question generation and verification API using independent OpenCode Go agents."
+description = "Entrance exam question generation and verification API using Qwen through OpenRouter."
 requires-python = ">=3.11"
 dependencies = []
 
