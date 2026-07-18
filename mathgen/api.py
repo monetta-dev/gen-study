@@ -687,8 +687,6 @@ class MathGenerationHandler(BaseHTTPRequestHandler):
         config = {
             "apiUrl": _env_string("GUI_API_URL", ""),
             "visualApiUrl": _env_string("GUI_VISUAL_API_URL", ""),
-            "enableRenderOutput": _env_flag("PROBLEM_RENDER_OUTPUT_ENABLED"),
-            "enableCompositeRender": _env_flag("COMPOSITE_RENDER_ENABLED"),
             "includeTrace": _env_flag("GUI_INCLUDE_TRACE"),
             "showProcess": _env_flag("GUI_SHOW_PROCESS"),
             "showFullRawResponse": _env_flag("GUI_SHOW_FULL_RAW_RESPONSE"),

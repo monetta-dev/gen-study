@@ -96,13 +96,7 @@
               <input id="autoVisualInput" name="autoVisual" type="checkbox">
               <span>Generate visuals</span>
             </label>
-            <label class="visual-toggle" id="renderOutputToggle" hidden>
-              <input id="renderOutputInput" name="renderOutput" type="checkbox" disabled>
-              <span>Render PNG</span>
-            </label>
             <button id="sampleButton" type="button">Load Sample</button>
-            <button id="visualButton" type="button" disabled>Generate Visuals</button>
-            <button id="compositeButton" type="button" disabled hidden>Create Composite PNG</button>
             <button id="generateButton" type="submit">Generate</button>
           </div>
         </form>
@@ -112,12 +106,24 @@
 
       <section class="output-grid" aria-label="Rendered output">
         <article class="output-section problem-section">
-          <div class="section-label">Problem</div>
+          <div class="section-header">
+            <div class="section-label">Problem</div>
+            <button id="copyProblemButton" class="copy-button" type="button" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              <span>Copy</span>
+            </button>
+          </div>
           <div id="problemOutput" class="rendered-text empty">No problem loaded.</div>
         </article>
 
         <article class="output-section solution-section">
-          <div class="section-label">Solution</div>
+          <div class="section-header">
+            <div class="section-label">Solution</div>
+            <button id="copySolutionButton" class="copy-button" type="button" disabled>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              <span>Copy</span>
+            </button>
+          </div>
           <div id="solutionOutput" class="rendered-text empty">No solution loaded.</div>
         </article>
       </section>
@@ -125,16 +131,6 @@
       <section class="visual-section" aria-label="Generated visuals">
         <div class="section-label">Visuals</div>
         <div id="visualOutput" class="visual-output empty">No visuals loaded.</div>
-      </section>
-
-      <section class="render-section" aria-label="Rendered PNG output" hidden>
-        <div class="section-label">Rendered PNG</div>
-        <div id="renderedOutput" class="rendered-output empty">No rendered PNG loaded.</div>
-      </section>
-
-      <section class="composite-section" aria-label="Composite PNG output" hidden>
-        <div class="section-label">Composite PNG</div>
-        <div id="compositeOutput" class="rendered-output empty">No composite PNG loaded.</div>
       </section>
 
       <section class="process-section" aria-label="Generation process">

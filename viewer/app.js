@@ -13,28 +13,19 @@ const apiUrlInput = document.getElementById("apiUrlInput");
 const visualApiUrlInput = document.getElementById("visualApiUrlInput");
 const apiKeyInput = document.getElementById("apiKeyInput");
 const autoVisualInput = document.getElementById("autoVisualInput");
-const renderOutputInput = document.getElementById("renderOutputInput");
 const sampleButton = document.getElementById("sampleButton");
-const visualButton = document.getElementById("visualButton");
-const compositeButton = document.getElementById("compositeButton");
 const generateButton = document.getElementById("generateButton");
 const statusMessage = document.getElementById("statusMessage");
 const problemOutput = document.getElementById("problemOutput");
 const solutionOutput = document.getElementById("solutionOutput");
 const visualOutput = document.getElementById("visualOutput");
-const renderedOutput = document.getElementById("renderedOutput");
-const compositeOutput = document.getElementById("compositeOutput");
 const processOutput = document.getElementById("processOutput");
 const rawOutput = document.getElementById("rawOutput");
+const copyProblemButton = document.getElementById("copyProblemButton");
+const copySolutionButton = document.getElementById("copySolutionButton");
 const processSection = document.querySelector(".process-section");
-const renderToggle =
-  document.getElementById("renderOutputToggle") ||
-  (renderOutputInput ? renderOutputInput.closest(".visual-toggle") : null);
-const renderSection = document.querySelector(".render-section");
-const compositeSection = document.querySelector(".composite-section");
 let currentTextResponse = null;
 let currentVisualResponse = null;
-let currentCompositeResponse = null;
 
 function appConfig() {
   return window.GEN_STUDY_CONFIG || {};
@@ -104,17 +95,6 @@ function defaultVisualApiUrl() {
   return "http://127.0.0.1:8000/visuals/generate";
 }
 
-function defaultCompositeApiUrl() {
-  const apiUrl = defaultApiUrl();
-  if (apiUrl.endsWith("/generate")) {
-    return `${apiUrl.slice(0, -"/generate".length)}/render/composite`;
-  }
-  if (window.location.protocol === "http:" || window.location.protocol === "https:") {
-    return `${window.location.origin}/render/composite`;
-  }
-  return "http://127.0.0.1:8000/render/composite";
-}
-
 function setTopicOptions(subject) {
   const topicOptions = document.getElementById("topicOptions");
   clearNode(topicOptions);
@@ -144,10 +124,6 @@ function setStatus(message, type = "") {
 
 function setLoading(isLoading) {
   generateButton.disabled = isLoading;
-  visualButton.disabled = isLoading || !currentTextResponse;
-  if (compositeButton) {
-    compositeButton.disabled = isLoading || !canCreateComposite();
-  }
   sampleButton.disabled = isLoading;
   generateButton.textContent = isLoading ? "Generating..." : "Generate";
 }
@@ -155,26 +131,72 @@ function setLoading(isLoading) {
 function setVisualLoading(isLoading) {
   generateButton.disabled = isLoading;
   sampleButton.disabled = isLoading;
-  visualButton.disabled = isLoading || !currentTextResponse;
-  if (compositeButton) {
-    compositeButton.disabled = isLoading || !canCreateComposite();
-  }
-  visualButton.textContent = isLoading ? "Generating Visuals..." : "Generate Visuals";
-}
-
-function canCreateComposite() {
-  return Boolean(
-    configFlag("enableCompositeRender") &&
-    currentTextResponse &&
-    currentTextResponse.rendered_output &&
-    Array.isArray(currentTextResponse.rendered_output.assets) &&
-    currentTextResponse.rendered_output.assets.length > 0
-  );
 }
 
 function clearNode(node) {
   while (node.firstChild) {
     node.removeChild(node.firstChild);
+  }
+}
+
+async function copyTextToClipboard(text) {
+  if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  // The Clipboard API is only exposed on secure contexts, so plain-HTTP
+  // origins (e.g. local development) fall back to a hidden textarea.
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error("Clipboard access was rejected by the browser.");
+  }
+}
+
+function syncCopyButtons() {
+  const response =
+    currentTextResponse && currentTextResponse.status === "success"
+      ? currentTextResponse
+      : null;
+  copyProblemButton.disabled = !(response && response.problem);
+  copySolutionButton.disabled = !(response && response.solution);
+}
+
+function showCopyFeedback(button) {
+  const label = button.querySelector("span");
+  if (!label) {
+    return;
+  }
+  if (!button.dataset.defaultLabel) {
+    button.dataset.defaultLabel = label.textContent;
+  }
+  button.classList.add("copied");
+  label.textContent = "Copied!";
+  if (button._copyFeedbackTimer) {
+    clearTimeout(button._copyFeedbackTimer);
+  }
+  button._copyFeedbackTimer = setTimeout(() => {
+    button.classList.remove("copied");
+    label.textContent = button.dataset.defaultLabel;
+  }, 1600);
+}
+
+async function copySectionText(button, text) {
+  if (!text) {
+    return;
+  }
+  try {
+    await copyTextToClipboard(text);
+    showCopyFeedback(button);
+  } catch (error) {
+    setStatus(`Copy failed: ${error.message}`, "error");
   }
 }
 
@@ -339,22 +361,6 @@ function resetVisualOutput(message = "No visuals loaded.") {
   currentVisualResponse = null;
 }
 
-function resetRenderedOutput(message = "No rendered PNG loaded.") {
-  clearNode(renderedOutput);
-  renderedOutput.textContent = message;
-  renderedOutput.classList.add("empty");
-}
-
-function resetCompositeOutput(message = "No composite PNG loaded.") {
-  if (!compositeOutput) {
-    return;
-  }
-  clearNode(compositeOutput);
-  compositeOutput.textContent = message;
-  compositeOutput.classList.add("empty");
-  currentCompositeResponse = null;
-}
-
 function resetProcessOutput(message = "No process loaded.") {
   if (!configFlag("showProcess")) {
     return;
@@ -501,85 +507,6 @@ function renderVisualResponse(data) {
   visualOutput.appendChild(grid);
 }
 
-function renderProblemImages(data) {
-  clearNode(renderedOutput);
-  renderedOutput.classList.remove("empty");
-
-  const output = data.rendered_output;
-  const assets = output && Array.isArray(output.assets) ? output.assets : [];
-  if (assets.length === 0) {
-    renderedOutput.textContent = "No rendered PNG was returned.";
-    renderedOutput.classList.add("empty");
-    return;
-  }
-
-  const grid = document.createElement("div");
-  grid.className = "rendered-grid";
-  assets.forEach((asset, index) => {
-    const figure = document.createElement("figure");
-    figure.className = "rendered-figure";
-
-    const image = document.createElement("img");
-    image.className = "rendered-image";
-    image.alt = `${asset.title || asset.kind || "rendered"} page ${asset.page || index + 1}`;
-    image.src = `data:${asset.mime_type || "image/png"};base64,${asset.png_base64}`;
-    figure.appendChild(image);
-
-    const caption = document.createElement("figcaption");
-    caption.textContent = `${asset.title || asset.kind || "Rendered"} · page ${asset.page || index + 1}`;
-    figure.appendChild(caption);
-    grid.appendChild(figure);
-  });
-
-  renderedOutput.appendChild(grid);
-}
-
-function renderCompositeImages(data) {
-  currentCompositeResponse = data;
-  clearNode(compositeOutput);
-  compositeOutput.classList.remove("empty");
-
-  const assets = Array.isArray(data.composite_assets) ? data.composite_assets : [];
-  if (assets.length === 0) {
-    compositeOutput.textContent = "No composite PNG was returned.";
-    compositeOutput.classList.add("empty");
-    return;
-  }
-
-  const grid = document.createElement("div");
-  grid.className = "rendered-grid";
-  assets.forEach((asset) => {
-    const figure = document.createElement("figure");
-    figure.className = "rendered-figure";
-
-    const image = document.createElement("img");
-    image.className = "rendered-image";
-    image.alt = `${asset.kind || "composite"} composite`;
-    image.src = `data:${asset.mime_type || "image/png"};base64,${asset.png_base64}`;
-    figure.appendChild(image);
-
-    const caption = document.createElement("figcaption");
-    caption.textContent = asset.kind === "solution" ? "Composite solution" : "Composite problem";
-    figure.appendChild(caption);
-    grid.appendChild(figure);
-  });
-
-  compositeOutput.appendChild(grid);
-
-  if (data.layout_decision) {
-    const details = document.createElement("details");
-    details.className = "source-details";
-    const summary = document.createElement("summary");
-    summary.textContent = "Layout decision";
-    const source = document.createElement("pre");
-    source.className = "tikz-source";
-    source.textContent = JSON.stringify(data.layout_decision, null, 2);
-    details.appendChild(summary);
-    details.appendChild(source);
-    compositeOutput.appendChild(details);
-  }
-}
-
 async function typeset() {
   if (window.MathJax && window.MathJax.typesetPromise) {
     await window.MathJax.typesetPromise([problemOutput, solutionOutput]);
@@ -593,29 +520,17 @@ async function renderResponse(data) {
     currentTextResponse = data;
     appendRichText(problemOutput, data.problem);
     appendRichText(solutionOutput, data.solution);
-    if (data.rendered_output && data.rendered_output.status === "compiled") {
-      renderProblemImages(data);
-    } else {
-      resetRenderedOutput();
-    }
     renderTraceRecords(data.trace, "Problem Generation", false);
-    visualButton.disabled = false;
-    if (compositeButton) {
-      compositeButton.disabled = !canCreateComposite();
-    }
     setStatus("Generation completed.", "ok");
   } else {
     currentTextResponse = null;
-    visualButton.disabled = true;
-    if (compositeButton) {
-      compositeButton.disabled = true;
-    }
     const detail = data.detail || data.reason || data.error || "Generation failed.";
     appendRichText(problemOutput, data.problem);
     appendRichText(solutionOutput, data.solution);
-    resetRenderedOutput();
     setStatus(detail, "error");
   }
+
+  syncCopyButtons();
 
   try {
     await typeset();
@@ -630,9 +545,6 @@ function requestPayload() {
     level: levelInput.value.trim(),
     topic: topicInput.value.trim()
   };
-  if (configFlag("enableRenderOutput") && renderOutputInput && renderOutputInput.checked) {
-    payload.render_output = true;
-  }
   if (configFlag("includeTrace")) {
     payload.trace = true;
   }
@@ -657,10 +569,8 @@ async function generateProblem(event) {
   }
 
   setLoading(true);
-  setStatus("Generating. This can take several minutes.", "");
+  setStatus("Generating. This can take several minutes.", "loading");
   resetVisualOutput();
-  resetRenderedOutput(renderOutputInput.checked ? "Rendering PNG..." : "No rendered PNG loaded.");
-  resetCompositeOutput();
   resetProcessOutput("Generating...");
 
   try {
@@ -714,7 +624,7 @@ async function generateVisuals() {
   }
 
   setVisualLoading(true);
-  setStatus("Generating visuals. This can take several minutes.", "");
+  setStatus("Generating visuals. This can take several minutes.", "loading");
   resetVisualOutput("Generating visuals...");
 
   try {
@@ -728,9 +638,6 @@ async function generateVisuals() {
     renderTraceRecords(data.trace, "Visual Generation", true);
     renderRawResponse(configFlag("showFullRawResponse") ? { text: currentTextResponse, visual: data } : currentTextResponse);
     if (data.status === "success") {
-      if (compositeButton) {
-        compositeButton.disabled = !canCreateComposite();
-      }
       setStatus("Visual generation completed.", "ok");
     } else {
       setStatus(data.detail || data.reason || data.error || "Visual generation failed.", "error");
@@ -739,70 +646,6 @@ async function generateVisuals() {
     setStatus(error.message, "error");
   } finally {
     setVisualLoading(false);
-  }
-}
-
-function compositePayload() {
-  if (!currentTextResponse || !currentTextResponse.rendered_output) {
-    return null;
-  }
-  const payload = {
-    problem: currentTextResponse.problem,
-    solution: currentTextResponse.solution,
-    rendered_output: currentTextResponse.rendered_output,
-    visual_assets:
-      currentVisualResponse && Array.isArray(currentVisualResponse.visual_assets)
-        ? currentVisualResponse.visual_assets
-        : []
-  };
-  if (configFlag("includeTrace")) {
-    payload.trace = true;
-  }
-  return payload;
-}
-
-async function generateComposite() {
-  const payload = compositePayload();
-  if (!payload) {
-    setStatus("Render problem PNGs before creating a composite PNG.", "error");
-    return;
-  }
-
-  const headers = {
-    "Content-Type": "application/json"
-  };
-  const apiKey = apiKeyInput.value.trim();
-  if (apiKey) {
-    headers["X-API-Key"] = apiKey;
-  }
-
-  if (compositeButton) {
-    compositeButton.disabled = true;
-    compositeButton.textContent = "Creating Composite...";
-  }
-  setStatus("Creating composite PNGs.", "");
-  resetCompositeOutput("Creating composite PNGs...");
-
-  try {
-    const data = await fetchJsonResult(
-      defaultCompositeApiUrl(),
-      headers,
-      payload,
-      "Composite API"
-    );
-    if (data.status === "success") {
-      renderCompositeImages(data);
-      setStatus("Composite PNGs created.", "ok");
-    } else {
-      setStatus(data.detail || data.reason || data.error || "Composite rendering failed.", "error");
-    }
-  } catch (error) {
-    setStatus(error.message, "error");
-  } finally {
-    if (compositeButton) {
-      compositeButton.textContent = "Create Composite PNG";
-      compositeButton.disabled = !canCreateComposite();
-    }
   }
 }
 
@@ -836,8 +679,6 @@ function formatNonJsonResponse(label, apiUrl, response, text) {
 function loadSample() {
   currentTextResponse = sampleResponse;
   resetVisualOutput();
-  resetRenderedOutput();
-  resetCompositeOutput();
   resetProcessOutput();
   renderResponse(sampleResponse);
 }
@@ -885,36 +726,20 @@ visualApiUrlInput.value = defaultVisualApiUrl();
 if (processSection && !configFlag("showProcess")) {
   processSection.hidden = true;
 }
-if (configFlag("enableRenderOutput")) {
-  if (renderToggle) {
-    renderToggle.hidden = false;
-  }
-  if (renderOutputInput) {
-    renderOutputInput.disabled = false;
-  }
-  if (renderSection) {
-    renderSection.hidden = false;
-  }
-} else {
-  if (renderOutputInput) {
-    renderOutputInput.checked = false;
-  }
-}
-if (configFlag("enableCompositeRender")) {
-  if (compositeButton) {
-    compositeButton.hidden = false;
-    compositeButton.disabled = !canCreateComposite();
-  }
-  if (compositeSection) {
-    compositeSection.hidden = false;
-  }
-}
 initializeRequestDefaults();
 form.addEventListener("submit", generateProblem);
 subjectInput.addEventListener("change", syncTopicForSubject);
 sampleButton.addEventListener("click", loadSample);
-visualButton.addEventListener("click", generateVisuals);
-if (compositeButton) {
-  compositeButton.addEventListener("click", generateComposite);
-}
+copyProblemButton.addEventListener("click", () => {
+  copySectionText(
+    copyProblemButton,
+    currentTextResponse ? currentTextResponse.problem : ""
+  );
+});
+copySolutionButton.addEventListener("click", () => {
+  copySectionText(
+    copySolutionButton,
+    currentTextResponse ? currentTextResponse.solution : ""
+  );
+});
 loadSample();
