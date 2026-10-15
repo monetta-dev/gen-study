@@ -1,4 +1,4 @@
-"""OpenRouter Qwen client."""
+"""OpenRouter client for GPT-6.1 Sol and optional Qwen models."""
 
 from __future__ import annotations
 
@@ -11,11 +11,15 @@ import urllib.request
 from typing import Any
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+GPT_61_SOL_MODEL = "openai/gpt-6.1-sol"
+DEFAULT_MODEL = GPT_61_SOL_MODEL
 QWEN_MAX_MODEL = "qwen/qwen3.7-max"
 QWEN_PLUS_MODEL = "qwen/qwen3.7-plus"
 QWEN_MODELS = {QWEN_MAX_MODEL, QWEN_PLUS_MODEL}
 QWEN_MODEL = QWEN_MAX_MODEL
-QWEN_MODEL_ALIASES = {
+SUPPORTED_MODELS = QWEN_MODELS | {GPT_61_SOL_MODEL}
+MODEL_ALIASES = {
+    "gpt-6.1-sol": GPT_61_SOL_MODEL,
     "qwen3.7-max": QWEN_MAX_MODEL,
     "qwen3.7-plus": QWEN_PLUS_MODEL,
 }
@@ -60,8 +64,8 @@ def _env_flag(name: str, default: bool) -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
-class OpenRouterQwenClient:
-    """Qwen 3.7 client for OpenRouter's OpenAI-compatible endpoint."""
+class OpenRouterClient:
+    """Model client for OpenRouter's OpenAI-compatible endpoint."""
 
     def __init__(
         self,
@@ -73,6 +77,7 @@ class OpenRouterQwenClient:
         thinking_enabled: bool | None = None,
         stream: bool | None = None,
         model: str | None = None,
+        reasoning_effort: str | None = None,
         **_unused: Any,
     ) -> None:
         self.api_key = api_key or _env_string("OPENROUTER_API_KEY")
@@ -80,6 +85,15 @@ class OpenRouterQwenClient:
             base_url or _env_string("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL)
         ).rstrip("/")
         self.model = self._configured_model(model)
+        self.reasoning_effort = (
+            reasoning_effort or _env_string("OPENROUTER_REASONING_EFFORT") or "high"
+        )
+        if self.model == GPT_61_SOL_MODEL and self.reasoning_effort not in {
+            "low", "medium", "high", "xhigh", "max"
+        }:
+            raise LLMError(
+                "OPENROUTER_REASONING_EFFORT must be low, medium, high, xhigh, or max"
+            )
         self.timeout_seconds = timeout_seconds or _env_float("OPENROUTER_TIMEOUT_SECONDS", 300.0)
         self.max_tokens = max_tokens or _env_int("OPENROUTER_MAX_TOKENS", 32768)
         self.thinking_budget_tokens = (
@@ -97,10 +111,10 @@ class OpenRouterQwenClient:
         self.retry_delay_seconds = _env_float("OPENROUTER_RETRY_DELAY_SECONDS", 10.0)
 
     def _configured_model(self, model: str | None) -> str:
-        configured_model = model or _env_string("OPENROUTER_MODEL", QWEN_MODEL)
-        configured_model = QWEN_MODEL_ALIASES.get(configured_model, configured_model)
-        if configured_model not in QWEN_MODELS:
-            allowed = ", ".join(sorted(QWEN_MODELS))
+        configured_model = model or _env_string("OPENROUTER_MODEL") or DEFAULT_MODEL
+        configured_model = MODEL_ALIASES.get(configured_model, configured_model)
+        if configured_model not in SUPPORTED_MODELS:
+            allowed = ", ".join(sorted(SUPPORTED_MODELS))
             raise LLMError(f"OPENROUTER_MODEL must be one of: {allowed}")
         return configured_model
 
@@ -119,9 +133,10 @@ class OpenRouterQwenClient:
         payload = {
             "model": self.model,
             "max_tokens": self.max_tokens,
-            "temperature": 0.4,
             "messages": self._messages(messages),
         }
+        if self.model in QWEN_MODELS:
+            payload["temperature"] = 0.4
         self._apply_thinking(payload)
         if self.stream:
             payload["stream"] = True
@@ -292,6 +307,14 @@ class OpenRouterQwenClient:
         return f"{self.base_url}/chat/completions"
 
     def _apply_thinking(self, payload: dict[str, Any]) -> None:
+        if self.model == GPT_61_SOL_MODEL:
+            if not self.thinking_enabled:
+                raise LLMError(
+                    "GPT-6.1 Sol requires thinking; set OPENROUTER_THINKING_ENABLED=true "
+                    "and use OPENROUTER_REASONING_EFFORT=low to reduce reasoning"
+                )
+            payload["reasoning"] = {"effort": self.reasoning_effort, "exclude": True}
+            return
         if not self.thinking_enabled:
             payload["reasoning"] = {"enabled": False}
             return
@@ -317,3 +340,7 @@ class OpenRouterQwenClient:
         if isinstance(retry_after, (int, float)) and retry_after >= 0:
             return min(float(retry_after), self.retry_delay_seconds)
         return self.retry_delay_seconds
+
+
+# Preserve imports used by existing integrations.
+OpenRouterQwenClient = OpenRouterClient

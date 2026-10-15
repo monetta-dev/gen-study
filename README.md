@@ -20,18 +20,20 @@ runtime, and returns rendered PNG assets. Requests to `/generate` containing
 - `OPENROUTER_API_KEY` in `.env.local` or the shell environment
 - Optional: `OPENROUTER_BASE_URL`, defaults to `https://openrouter.ai/api/v1`
 - Optional visual API setting: `VISUAL_TIKZ_REPAIR_ATTEMPTS`, defaults to `2`
-- Optional: `OPENROUTER_MODEL`, defaults to `qwen/qwen3.7-max`
+- Optional: `OPENROUTER_MODEL`, defaults to `openai/gpt-6.1-sol`
 - Optional: `OPENROUTER_TIMEOUT_SECONDS`, defaults to `300`
 - Optional: `OPENROUTER_MAX_TOKENS`, defaults to `32768`
 - Optional: `OPENROUTER_STREAM`, defaults to `true`
 - Optional: `OPENROUTER_THINKING_ENABLED`, defaults to `true`
-- Optional: `OPENROUTER_THINKING_BUDGET_TOKENS`, defaults to `16384`
+- Optional: `OPENROUTER_REASONING_EFFORT`, defaults to `high` for GPT-6.1 Sol
+  (`low`, `medium`, `high`, `xhigh`, or `max`)
+- Optional: `OPENROUTER_THINKING_BUDGET_TOKENS`, defaults to `16384` for Qwen
 - Optional: `OPENROUTER_RETRY_ATTEMPTS`, defaults to `3`
 - Optional: `OPENROUTER_RETRY_DELAY_SECONDS`, defaults to `10`
 - Optional narrow-agent thinking-budget overrides such as
   `COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS` and
   `VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS`; blank means use the main
-  Qwen thinking settings
+  Qwen thinking settings (GPT roles use `<ROLE>_REASONING_EFFORT` instead)
 - Optional per-agent model overrides such as `GENERATOR_MODEL`,
   `COMPLIANCE_VALIDATOR_MODEL`, and `VISUAL_TIKZ_MODEL`; blank means use
   `OPENROUTER_MODEL`
@@ -60,11 +62,13 @@ Then edit `.env.local` and set your actual API key:
 OPENROUTER_API_KEY=your_openrouter_api_key_here
 VISUAL_TIKZ_REPAIR_ATTEMPTS=2
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_MODEL=qwen/qwen3.7-max
+OPENROUTER_MODEL=openai/gpt-6.1-sol
 OPENROUTER_STREAM=true
 OPENROUTER_TIMEOUT_SECONDS=300
 OPENROUTER_MAX_TOKENS=32768
 OPENROUTER_THINKING_ENABLED=true
+OPENROUTER_REASONING_EFFORT=high
+# Optional Qwen models only:
 OPENROUTER_THINKING_BUDGET_TOKENS=16384
 OPENROUTER_RETRY_ATTEMPTS=3
 OPENROUTER_RETRY_DELAY_SECONDS=10
@@ -137,17 +141,18 @@ includes the exception message. Keep `API_DEBUG=false` in production.
 
 ## Model Provider
 
-The backend uses OpenRouter with Qwen 3.7. Max is the default; Plus can be
-selected globally or per agent.
+The backend uses OpenRouter with GPT-6.1 Sol by default for all agents.
+Qwen 3.7 Max and Plus remain available as explicit global or per-agent overrides.
 
-For Qwen 3.7 Max everywhere, configure Render or `.env.local` like this:
+For GPT-6.1 Sol everywhere, configure Render or `.env.local` like this:
 
 ```dotenv
 OPENROUTER_API_KEY=your_openrouter_api_key
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-OPENROUTER_MODEL=qwen/qwen3.7-max
+OPENROUTER_MODEL=openai/gpt-6.1-sol
 OPENROUTER_STREAM=true
 OPENROUTER_THINKING_ENABLED=true
+OPENROUTER_REASONING_EFFORT=high
 ```
 
 For Qwen 3.7 Plus everywhere:
@@ -160,7 +165,7 @@ For a per-agent override, leave `OPENROUTER_MODEL` as the default and set the
 specific role:
 
 ```dotenv
-GENERATOR_MODEL=qwen3.7-max
+GENERATOR_MODEL=gpt-6.1-sol
 COMPLIANCE_VALIDATOR_MODEL=qwen3.7-plus
 VISUAL_TIKZ_VALIDATOR_MODEL=qwen3.7-plus
 ```
@@ -168,6 +173,7 @@ VISUAL_TIKZ_VALIDATOR_MODEL=qwen3.7-plus
 The provider model IDs are:
 
 ```text
+openai/gpt-6.1-sol
 qwen/qwen3.7-max
 qwen/qwen3.7-plus
 ```
@@ -182,17 +188,33 @@ The client uses the OpenAI-compatible Chat Completions endpoint. It uses interna
 SSE streaming by default, then collects the streamed text and returns the same
 normal JSON response from this API.
 
-Thinking is sent as:
+GPT-6.1 Sol reasoning is sent as:
+
+```json
+{"reasoning":{"effort":"high","exclude":true}}
+```
+
+Set `OPENROUTER_REASONING_EFFORT` globally or `<ROLE>_REASONING_EFFORT`
+for one agent. GPT-6.1 Sol requires reasoning, so keep
+`OPENROUTER_THINKING_ENABLED=true` and any role-specific thinking flags enabled.
+Use `low` to reduce reasoning. Qwen thinking-token budgets do not apply to GPT.
+The client omits `temperature` for GPT-6.1 Sol. `OPENROUTER_MAX_TOKENS`
+limits the total completion budget, including reasoning tokens.
+
+Existing deployments must also update `OPENROUTER_MODEL` and clear or update
+any role-specific `*_MODEL` values that still select Qwen.
+
+For optional Qwen models, thinking is sent as:
 
 ```json
 {"reasoning":{"enabled":true,"max_tokens":16384,"exclude":true}}
 ```
 
-When thinking is disabled, the client sends `{"reasoning":{"enabled":false}}`.
+For Qwen, when thinking is disabled, the client sends `{"reasoning":{"enabled":false}}`.
 `OPENROUTER_THINKING_BUDGET_TOKENS` controls reasoning tokens, while
-`OPENROUTER_MAX_TOKENS` independently controls final-answer tokens.
+`OPENROUTER_MAX_TOKENS` sets the completion token limit.
 
-Role-specific thinking-budget overrides are supported for every agent. Leave
+For Qwen, role-specific thinking-budget overrides are supported for every agent. Leave
 these blank to keep the main high-quality Qwen thinking budget everywhere.
 
 ```text

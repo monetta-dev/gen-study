@@ -6,7 +6,10 @@ import urllib.error
 import unittest
 from unittest.mock import patch
 
-from mathgen.llm import LLMError, OpenRouterQwenClient, QWEN_MODEL, QWEN_PLUS_MODEL
+from mathgen.llm import (
+    GPT_61_SOL_MODEL, LLMError, OpenRouterClient, OpenRouterQwenClient,
+    QWEN_MODEL, QWEN_PLUS_MODEL,
+)
 
 
 class FakeMessagesResponse:
@@ -80,6 +83,7 @@ class OpenRouterQwenClientTests(unittest.TestCase):
                 "OPENROUTER_API_KEY",
                 "OPENROUTER_BASE_URL",
                 "OPENROUTER_MODEL",
+                "OPENROUTER_REASONING_EFFORT",
                 "OPENROUTER_TIMEOUT_SECONDS",
                 "OPENROUTER_MAX_TOKENS",
                 "OPENROUTER_THINKING_BUDGET_TOKENS",
@@ -102,7 +106,7 @@ class OpenRouterQwenClientTests(unittest.TestCase):
             else:
                 os.environ[key] = value
 
-    def test_qwen_streams_messages_with_thinking_budget(self):
+    def test_default_sol_streams_messages_with_reasoning_effort(self):
         captured = {}
 
         def fake_urlopen(request, timeout):
@@ -128,7 +132,7 @@ class OpenRouterQwenClientTests(unittest.TestCase):
         self.assertEqual(captured["url"], "https://openrouter.ai/api/v1/chat/completions")
         self.assertEqual(captured["timeout"], 300)
         self.assertEqual(captured["headers"]["Authorization"], "Bearer dashscope-key")
-        self.assertEqual(captured["payload"]["model"], QWEN_MODEL)
+        self.assertEqual(captured["payload"]["model"], GPT_61_SOL_MODEL)
         self.assertEqual(captured["payload"]["max_tokens"], 32768)
         self.assertEqual(captured["payload"]["stream"], True)
         self.assertEqual(
@@ -140,8 +144,47 @@ class OpenRouterQwenClientTests(unittest.TestCase):
         )
         self.assertEqual(
             captured["payload"]["reasoning"],
-            {"enabled": True, "max_tokens": 16384, "exclude": True},
+            {"effort": "high", "exclude": True},
         )
+
+        self.assertNotIn("temperature", captured["payload"])
+
+    def test_sol_alias_and_reasoning_effort(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return FakeMessagesResponse()
+
+        os.environ["OPENROUTER_MODEL"] = "gpt-6.1-sol"
+        os.environ["OPENROUTER_REASONING_EFFORT"] = "medium"
+        # Qwen budgets must not affect GPT requests.
+        os.environ["OPENROUTER_THINKING_BUDGET_TOKENS"] = "0"
+        client = OpenRouterClient(api_key="test-key", stream=False)
+        with patch("urllib.request.urlopen", fake_urlopen):
+            client.chat([{"role": "user", "content": "hello"}])
+        self.assertEqual(captured["payload"]["model"], GPT_61_SOL_MODEL)
+        self.assertEqual(captured["payload"]["reasoning"],
+                         {"effort": "medium", "exclude": True})
+        self.assertNotIn("temperature", captured["payload"])
+        self.assertEqual(OpenRouterClient(reasoning_effort="low").reasoning_effort, "low")
+
+    def test_sol_rejects_unsupported_reasoning_settings(self):
+        for effort in ("none", "minimal", "invalid"):
+            with self.subTest(effort=effort):
+                with self.assertRaisesRegex(LLMError, "OPENROUTER_REASONING_EFFORT"):
+                    OpenRouterClient(reasoning_effort=effort)
+        client = OpenRouterClient(api_key="test-key", thinking_enabled=False)
+        with patch("urllib.request.urlopen") as request:
+            with self.assertRaisesRegex(LLMError, "requires thinking"):
+                client.chat([{"role": "user", "content": "hello"}])
+            request.assert_not_called()
+
+    def test_blank_model_uses_sol_default(self):
+        os.environ["OPENROUTER_MODEL"] = " "
+        os.environ["OPENROUTER_REASONING_EFFORT"] = " "
+        self.assertEqual(OpenRouterClient().model, GPT_61_SOL_MODEL)
+        self.assertEqual(OpenRouterClient().reasoning_effort, "high")
 
     def test_streaming_can_be_disabled(self):
         captured = {}
@@ -238,7 +281,7 @@ class OpenRouterQwenClientTests(unittest.TestCase):
         os.environ["OPENROUTER_STREAM"] = "false"
         os.environ["OPENROUTER_THINKING_ENABLED"] = "false"
 
-        client = OpenRouterQwenClient()
+        client = OpenRouterQwenClient(model=QWEN_MODEL)
 
         with patch("urllib.request.urlopen", fake_urlopen):
             client.chat([{"role": "user", "content": "hello"}])
@@ -326,7 +369,7 @@ class OpenRouterQwenClientTests(unittest.TestCase):
         os.environ["OPENROUTER_THINKING_BUDGET_TOKENS"] = ""
         os.environ["OPENROUTER_STREAM"] = "false"
 
-        client = OpenRouterQwenClient()
+        client = OpenRouterQwenClient(model=QWEN_MODEL)
 
         with patch("urllib.request.urlopen", fake_urlopen):
             client.chat([{"role": "user", "content": "hello"}])
@@ -346,7 +389,7 @@ class OpenRouterQwenClientTests(unittest.TestCase):
         os.environ["OPENROUTER_THINKING_BUDGET_TOKENS"] = "8192"
         os.environ["OPENROUTER_STREAM"] = "false"
 
-        client = OpenRouterQwenClient()
+        client = OpenRouterQwenClient(model=QWEN_MODEL)
 
         with patch("urllib.request.urlopen", fake_urlopen):
             client.chat([{"role": "user", "content": "hello"}])
@@ -358,7 +401,7 @@ class OpenRouterQwenClientTests(unittest.TestCase):
         os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
         os.environ["OPENROUTER_THINKING_BUDGET_TOKENS"] = "0"
 
-        client = OpenRouterQwenClient()
+        client = OpenRouterQwenClient(model=QWEN_MODEL)
 
         with self.assertRaisesRegex(LLMError, "must be positive"):
             client.chat([{"role": "user", "content": "hello"}])
@@ -383,7 +426,7 @@ class OpenRouterQwenClientTests(unittest.TestCase):
         with self.assertRaisesRegex(LLMError, "contains a placeholder"):
             client.chat([{"role": "user", "content": "hello"}])
 
-    def test_rejects_non_qwen_model_override(self):
+    def test_rejects_unsupported_model_override(self):
         os.environ["OPENROUTER_API_KEY"] = "dashscope-key"
         os.environ["OPENROUTER_MODEL"] = "other-model"
 

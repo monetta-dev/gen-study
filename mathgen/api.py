@@ -28,7 +28,7 @@ from .composite_renderer import (
     CompositeRenderService,
 )
 from .env import load_dotenv
-from .llm import LLMError, OpenRouterQwenClient
+from .llm import LLMError, OpenRouterClient
 from .models import (
     ContractError,
     GenerateRequest,
@@ -54,10 +54,10 @@ def build_service(capture_trace: bool = False) -> MathGenerationService:
         enabled=_env_flag("GENERATION_TRACE"),
         capture=capture_trace,
     )
-    generator_client = _qwen_client_for_role("GENERATOR")
-    repair_client = _qwen_client_for_role("REPAIR")
-    critical_validator_client = _qwen_client_for_role("CRITICAL_VALIDATOR")
-    compliance_validator_client = _qwen_client_for_role("COMPLIANCE_VALIDATOR")
+    generator_client = _llm_client_for_role("GENERATOR")
+    repair_client = _llm_client_for_role("REPAIR")
+    critical_validator_client = _llm_client_for_role("CRITICAL_VALIDATOR")
+    compliance_validator_client = _llm_client_for_role("COMPLIANCE_VALIDATOR")
     return MathGenerationService(
         generator=GeneratorAgent(generator_client, tracer=tracer),
         repair_agent=RepairAgent(repair_client, tracer=tracer),
@@ -78,13 +78,13 @@ def build_visual_service(capture_trace: bool = False) -> VisualGenerationService
         enabled=_env_flag("GENERATION_TRACE"),
         capture=capture_trace,
     )
-    instruction_client = _qwen_client_for_role("VISUAL_INSTRUCTION")
-    tikz_client = _qwen_client_for_role("VISUAL_TIKZ")
-    tikz_validator_client = _qwen_client_for_role("VISUAL_TIKZ_VALIDATOR")
-    tikz_repair_client = _qwen_client_for_role("VISUAL_TIKZ_REPAIR")
+    instruction_client = _llm_client_for_role("VISUAL_INSTRUCTION")
+    tikz_client = _llm_client_for_role("VISUAL_TIKZ")
+    tikz_validator_client = _llm_client_for_role("VISUAL_TIKZ_VALIDATOR")
+    tikz_repair_client = _llm_client_for_role("VISUAL_TIKZ_REPAIR")
     renderer = None
     if _env_flag("VISUAL_RENDER_ENABLED", True):
-        tikz_compile_client = _qwen_client_for_role("VISUAL_TIKZ_COMPILE")
+        tikz_compile_client = _llm_client_for_role("VISUAL_TIKZ_COMPILE")
         renderer = TikZRenderer(
             compile_agent=TikZCompileAgent(tikz_compile_client, tracer=tracer),
             timeout_seconds=_env_float("VISUAL_COMPILE_TIMEOUT_SECONDS", 30.0),
@@ -116,16 +116,17 @@ def build_composite_service(capture_trace: bool = False) -> CompositeRenderServi
         enabled=_env_flag("GENERATION_TRACE"),
         capture=capture_trace,
     )
-    composite_client = _qwen_client_for_role("COMPOSITE_LAYOUT")
+    composite_client = _llm_client_for_role("COMPOSITE_LAYOUT")
     return CompositeRenderService(
         layout_agent=CompositeLayoutAgent(composite_client, tracer=tracer),
         tracer=tracer,
     )
 
 
-def _qwen_client_for_role(role: str) -> OpenRouterQwenClient:
-    return OpenRouterQwenClient(
+def _llm_client_for_role(role: str) -> OpenRouterClient:
+    return OpenRouterClient(
         model=_env_optional_string(f"{role}_MODEL"),
+        reasoning_effort=_env_optional_string(f"{role}_REASONING_EFFORT"),
         max_tokens=_env_optional_int(f"{role}_MAX_TOKENS"),
         thinking_budget_tokens=_env_optional_int(f"{role}_THINKING_BUDGET_TOKENS"),
         thinking_enabled=_env_optional_flag(f"{role}_THINKING_ENABLED"),

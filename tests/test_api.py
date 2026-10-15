@@ -16,6 +16,7 @@ from mathgen.agents import (
     RepairAgent,
 )
 from mathgen.api import MathGenerationHandler, create_server
+from mathgen.llm import GPT_61_SOL_MODEL
 import mathgen.api as api_module
 from mathgen.models import ModelOutputError
 
@@ -288,6 +289,22 @@ class ApiTests(unittest.TestCase):
         self.assertIn("trace", payload)
         self.assertTrue(any("Generator request" in record for record in payload["trace"]))
 
+    def test_all_services_default_to_sol_with_role_reasoning_override(self):
+        with patch.dict(os.environ, {"GENERATOR_REASONING_EFFORT": "medium"}, clear=True):
+            with patch.object(api_module, "load_dotenv"):
+                service = api_module.build_service()
+                visuals = api_module.build_visual_service()
+                composite = api_module.build_composite_service()
+        agents = [
+            service.generator, service.repair_agent, service.critical_validator,
+            service.compliance_validator, visuals.instruction_agent,
+            visuals.tikz_agent, visuals.tikz_validator, visuals.tikz_repair_agent,
+            visuals.renderer.compile_agent, composite.layout_agent,
+        ]
+        self.assertEqual([agent.client.model for agent in agents], [GPT_61_SOL_MODEL] * 10)
+        self.assertEqual(service.generator.client.reasoning_effort, "medium")
+        self.assertEqual(service.repair_agent.client.reasoning_effort, "high")
+
     def test_build_service_uses_role_specific_client_settings(self):
         previous = {
             key: os.environ.get(key)
@@ -306,7 +323,7 @@ class ApiTests(unittest.TestCase):
         previous_cwd = os.getcwd()
         calls = []
 
-        class FakeOpenRouterQwenClient:
+        class FakeOpenRouterClient:
             def __init__(self, **kwargs):
                 calls.append(kwargs)
 
@@ -325,7 +342,7 @@ class ApiTests(unittest.TestCase):
                 os.environ["CRITICAL_VALIDATOR_THINKING_BUDGET_TOKENS"] = "8192"
                 os.environ["COMPLIANCE_VALIDATOR_THINKING_BUDGET_TOKENS"] = "4096"
                 os.environ["COMPLIANCE_VALIDATOR_THINKING_ENABLED"] = "true"
-                with patch.object(api_module, "OpenRouterQwenClient", FakeOpenRouterQwenClient):
+                with patch.object(api_module, "OpenRouterClient", FakeOpenRouterClient):
                     api_module.build_service()
             finally:
                 os.chdir(previous_cwd)
@@ -338,6 +355,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(
             {
                 "model": "qwen3.7-plus",
+                "reasoning_effort": None,
                 "max_tokens": None,
                 "thinking_budget_tokens": None,
                 "thinking_enabled": None,
@@ -348,6 +366,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(
             {
                 "model": None,
+                "reasoning_effort": None,
                 "max_tokens": None,
                 "thinking_budget_tokens": 2048,
                 "thinking_enabled": None,
@@ -358,6 +377,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(
             {
                 "model": None,
+                "reasoning_effort": None,
                 "max_tokens": None,
                 "thinking_budget_tokens": 8192,
                 "thinking_enabled": None,
@@ -368,6 +388,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn(
             {
                 "model": None,
+                "reasoning_effort": None,
                 "max_tokens": None,
                 "thinking_budget_tokens": 4096,
                 "thinking_enabled": True,
@@ -392,7 +413,7 @@ class ApiTests(unittest.TestCase):
         previous_cwd = os.getcwd()
         calls = []
 
-        class FakeOpenRouterQwenClient:
+        class FakeOpenRouterClient:
             def __init__(self, **kwargs):
                 calls.append(kwargs)
 
@@ -409,7 +430,7 @@ class ApiTests(unittest.TestCase):
                 os.environ["VISUAL_TIKZ_VALIDATOR_THINKING_BUDGET_TOKENS"] = "2048"
                 os.environ["VISUAL_TIKZ_REPAIR_THINKING_BUDGET_TOKENS"] = "4096"
                 os.environ["VISUAL_RENDER_ENABLED"] = "true"
-                with patch.object(api_module, "OpenRouterQwenClient", FakeOpenRouterQwenClient):
+                with patch.object(api_module, "OpenRouterClient", FakeOpenRouterClient):
                     api_module.build_visual_service()
             finally:
                 os.chdir(previous_cwd)
